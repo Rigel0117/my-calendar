@@ -51,7 +51,8 @@ function checkReminders() {
       const ahead = Math.floor(m / 1440) + 2;
       for (let k = -1; k <= ahead; k++) {
         const d = addDays(today, k);
-        if (!isStart(e, d)) continue;
+        // タスクは終了日（期限）を基準に、予定は開始日を基準に通知する
+        if (e.kind === 'task' ? d !== (e.endDate || e.date) : !isStart(e, d)) continue;
         const base = !e.allDay && /^\d{2}:\d{2}$/.test(e.start || '') ? e.start : ALLDAY_BASE;
         const fire = jstMs(d, base) - m * 60000;
         if (fire > now || now - fire >= LOOKBACK_MIN * 60000) continue;

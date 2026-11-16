@@ -31,6 +31,10 @@ public class CalEvent
     [JsonPropertyName("doneAt")] public double? DoneAt { get; set; }
 
     [JsonIgnore] public bool IsTask => Kind == "task";
+    /// <summary>タスクの終了日（期限）。開始日があるタスクは Date が開始日、EndDate が終了日</summary>
+    [JsonIgnore] public string Due => string.IsNullOrEmpty(EndDate) ? (Date ?? "") : EndDate;
+    /// <summary>開始日〜終了日のあるタスク（カレンダーではバーで表示）</summary>
+    [JsonIgnore] public bool IsSpanTask => IsTask && !string.IsNullOrEmpty(Date) && string.CompareOrdinal(Date, Due) < 0;
 
     public CalEvent Clone()
     {
@@ -77,16 +81,26 @@ public class Store
     public static int TaskOrder(CalEvent a, CalEvent b)
     {
         int c = a.Done.CompareTo(b.Done);
-        if (c == 0) c = string.CompareOrdinal(string.IsNullOrEmpty(a.Date) ? "9999" : a.Date, string.IsNullOrEmpty(b.Date) ? "9999" : b.Date);
+        if (c == 0) c = string.CompareOrdinal(a.Due == "" ? "9999" : a.Due, b.Due == "" ? "9999" : b.Due);
         if (c == 0) c = string.CompareOrdinal(string.IsNullOrEmpty(a.Start) ? "99" : a.Start, string.IsNullOrEmpty(b.Start) ? "99" : b.Start);
         if (c == 0) c = string.Compare(a.Title, b.Title, StringComparison.CurrentCulture);
         return c;
     }
 
+    /// <summary>カレンダーのマスに出すタスク（1日だけのもの）</summary>
     public List<CalEvent> TasksOn(DateOnly d)
     {
         var s = Dates.F(d);
-        var list = Tasks.Where(t => t.Date == s).ToList();
+        var list = Tasks.Where(t => t.Due == s && !t.IsSpanTask).ToList();
+        list.Sort(TaskOrder);
+        return list;
+    }
+
+    /// <summary>その日に取り組むタスク（開始日〜終了日の間）</summary>
+    public List<CalEvent> TasksActiveOn(DateOnly d)
+    {
+        var s = Dates.F(d);
+        var list = Tasks.Where(t => !string.IsNullOrEmpty(t.Date) && string.CompareOrdinal(t.Date, s) <= 0 && string.CompareOrdinal(s, t.Due) <= 0).ToList();
         list.Sort(TaskOrder);
         return list;
     }
@@ -342,7 +356,7 @@ public static class Dates
         var wEnd = wStart.AddDays(6);
         var segs = new List<SpanSeg>();
         var seen = new HashSet<string>();
-        foreach (var e in store.Live)
+        foreach (var e in store.Live.Concat(store.Tasks.Where(t => t.IsSpanTask)))
         {
             int span = Span(e);
             if (span == 0) continue;
@@ -407,7 +421,8 @@ public static class Dates
             for (int k = -1; k <= ahead; k++)
             {
                 var d = today.AddDays(k);
-                if (!IsStart(e, d)) continue;
+                // タスクは終了日（期限）を基準に、予定は開始日を基準に通知する
+                if (e.IsTask ? e.Due != F(d) : !IsStart(e, d)) continue;
                 var t = !e.AllDay && TimeOnly.TryParseExact(e.Start ?? "", "HH:mm", Inv, DateTimeStyles.None, out var tt) ? tt : AllDayBase;
                 var fire = d.ToDateTime(t).AddMinutes(-m);
                 if (fire <= now && now - fire < window) yield return (e, d, fire);

@@ -376,12 +376,13 @@ public class MainWindow : Window
     string DueText(CalEvent t, out bool over)
     {
         over = false;
-        if (!Dates.TryParse(t.Date, out var d)) return "期限なし";
+        if (!Dates.TryParse(t.Due, out var d)) return "期限なし";
+        string range = t.IsSpanTask && Dates.TryParse(t.Date, out var s0) ? $"{s0.Month}/{s0.Day}〜" : "";
         int dd = d.DayNumber - today.DayNumber;
         string rel = dd switch { 0 => "今日", 1 => "明日", -1 => "昨日", _ => $"{d.Month}/{d.Day}({Dates.WD[(int)d.DayOfWeek]})" };
-        string txt = rel + (string.IsNullOrEmpty(t.Start) ? "" : " " + t.Start);
+        string txt = range + rel + (string.IsNullOrEmpty(t.Start) ? "" : " " + t.Start);
         if (!t.Done && d < today) { over = true; return "期限切れ：" + txt; }
-        return "期限：" + txt;
+        return (range != "" ? "期間：" : "期限：") + txt;
     }
 
     /// <summary>タスク1件の行（チェックで完了、文字を押すと編集）</summary>
@@ -446,10 +447,10 @@ public class MainWindow : Window
         var open = all.Where(t => !t.Done).ToList();
         open.Sort(Store.TaskOrder);
         var todayS = Dates.F(today);
-        var over = open.Where(t => !string.IsNullOrEmpty(t.Date) && string.CompareOrdinal(t.Date, todayS) < 0).ToList();
-        var tod = open.Where(t => t.Date == todayS).ToList();
-        var later = open.Where(t => !string.IsNullOrEmpty(t.Date) && string.CompareOrdinal(t.Date, todayS) > 0).ToList();
-        var nodue = open.Where(t => string.IsNullOrEmpty(t.Date)).ToList();
+        var over = open.Where(t => t.Due != "" && string.CompareOrdinal(t.Due, todayS) < 0).ToList();
+        var tod = open.Where(t => t.Due == todayS).ToList();
+        var later = open.Where(t => t.Due != "" && string.CompareOrdinal(t.Due, todayS) > 0).ToList();
+        var nodue = open.Where(t => t.Due == "").ToList();
         var done = all.Where(t => t.Done).OrderByDescending(t => t.DoneAt ?? 0).Take(30).ToList();
 
         void Group(string h, List<CalEvent> items, bool warn = false)
@@ -540,7 +541,8 @@ public class MainWindow : Window
         var e = x.E;
         var tb = new TextBlock { FontSize = 12, Foreground = Brushes.White, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
         if (!x.Head) tb.Inlines.Add(new Run("◀ ") { FontSize = 8 });
-        if (!e.AllDay && x.Head && !string.IsNullOrEmpty(e.Start)) tb.Inlines.Add(new Run(e.Start + " ") { FontWeight = FontWeights.Bold });
+        if (e.IsTask) tb.Inlines.Add(new Run(e.Done ? "\uE73A " : "\uE739 ") { FontFamily = UI.Icons, FontSize = 10 });
+        else if (!e.AllDay && x.Head && !string.IsNullOrEmpty(e.Start)) tb.Inlines.Add(new Run(e.Start + " ") { FontWeight = FontWeights.Bold });
         tb.Inlines.Add(new Run(e.Title ?? ""));
         double l = x.Head ? 5 : 0, r = x.Tail ? 5 : 0;
         var bar = new Border
@@ -550,8 +552,11 @@ public class MainWindow : Window
             CornerRadius = new CornerRadius(l, r, r, l), Cursor = Cursors.Hand,
             ToolTip = $"{e.Title}（{x.St.Month}/{x.St.Day}〜{x.En.Month}/{x.En.Day}）",
         };
-        bar.MouseEnter += (_, _) => bar.Opacity = 0.88;
-        bar.MouseLeave += (_, _) => bar.Opacity = 1;
+        double baseOpacity = e.IsTask && e.Done ? 0.5 : 1;
+        if (e.IsTask && e.Done) tb.TextDecorations = TextDecorations.Strikethrough;
+        bar.Opacity = baseOpacity;
+        bar.MouseEnter += (_, _) => bar.Opacity = baseOpacity * 0.88;
+        bar.MouseLeave += (_, _) => bar.Opacity = baseOpacity;
         bar.MouseLeftButtonUp += (_, _) => OpenEditor(e.Id, x.St, x.St);
         return bar;
     }
@@ -649,13 +654,13 @@ public class MainWindow : Window
 
         list.Children.Clear();
         var evs = Dates.EventsOn(Store, d);
-        var ts = Store.TasksOn(d);
+        var ts = Store.TasksActiveOn(d);
         foreach (var (e, st) in evs)
             list.Children.Add(EventItem(e, st, Dates.TimeLabel(e, st, d), () => OpenEditor(e.Id, d, st)));
         if (ts.Count > 0)
         {
             list.Children.Add(GroupHeader("タスク"));
-            foreach (var t in ts) list.Children.Add(TaskItem(t, false));
+            foreach (var t in ts) list.Children.Add(TaskItem(t, t.IsSpanTask));
         }
         if (evs.Count == 0 && ts.Count == 0)
             list.Children.Add(new TextBlock { Text = "予定はありません", Foreground = P.Muted, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 28, 0, 0) });
@@ -721,7 +726,7 @@ public class MainWindow : Window
         dlg.ShowDialog();
         if (dlg.Result == null) return;
         Store.Events[dlg.Result.Id] = dlg.Result;
-        if (!dlg.Result.Deleted && Dates.TryParse(dlg.Result.Date, out var d) && dlg.JumpToDate) JumpTo(d); else Render();
+        if (!dlg.Result.Deleted && Dates.TryParse(dlg.Result.IsTask ? dlg.Result.Due : dlg.Result.Date, out var d) && dlg.JumpToDate) JumpTo(d); else Render();
         Changed();
     }
 

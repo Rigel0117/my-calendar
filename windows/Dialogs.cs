@@ -26,7 +26,8 @@ public class EventDialog : BaseDialog
     string kind;
     readonly CheckBox noDue, done;
     readonly Button segEvent, segTask;
-    readonly Grid repeatRow, remindRow;
+    readonly Grid repeatRow, remindRow, taskStartRow;
+    readonly DatePicker dTaskStart;
     readonly TextBlock lblDate, lblTime;
     readonly Grid timeGrid1, timeGrid2;
     readonly StackPanel untilField;
@@ -76,7 +77,7 @@ public class EventDialog : BaseDialog
         root.Children.Add(noDue);
 
         // 開始・終了
-        var d0 = e != null ? Dates.P(e.Date, date) : date;
+        var d0 = e != null ? Dates.P(e.IsTask ? e.Due : e.Date, date) : date;
         var d1 = e != null ? Dates.P(e.EndDate, d0) : date;
         string defStart = "10:00";
         if (e == null && date == Dates.Today) defStart = $"{Math.Min(DateTime.Now.Hour + 1, 23):00}:00";
@@ -85,6 +86,10 @@ public class EventDialog : BaseDialog
         dStart = Picker(d0); dEnd = Picker(d1);
         tStart = TimeBox(e != null ? e.Start ?? "" : kind == "task" ? "" : defStart);
         tEnd = TimeBox(e != null ? e.End ?? "" : defEnd);
+        // タスクの開始日（任意）
+        dTaskStart = Picker(e != null && e.IsSpanTask && Dates.TryParse(e.Date, out var ts0) ? ts0 : (DateOnly?)null);
+        taskStartRow = Row(UI.Field(P, "開始日（任意）", dTaskStart), new Border());
+        root.Children.Add(taskStartRow);
         var fDate = UI.Field(P, "開始日", dStart); var fTime = UI.Field(P, "開始時刻", tStart);
         lblDate = (TextBlock)fDate.Children[0]; lblTime = (TextBlock)fTime.Children[0];
         timeGrid1 = Row(fDate, fTime);
@@ -184,7 +189,7 @@ public class EventDialog : BaseDialog
         }
         Paint(segEvent, !task); Paint(segTask, task);
         Title = (task ? "タスク" : "予定") + (existing == null ? "を追加" : "を編集");
-        lblDate.Text = task ? "期限" : "開始日";
+        lblDate.Text = task ? "終了日（期限）" : "開始日";
         lblTime.Text = task ? "時刻（任意）" : "開始時刻";
         SyncVisibility();
     }
@@ -242,6 +247,7 @@ public class EventDialog : BaseDialog
         noDue.Visibility = show(task);
         done.Visibility = show(task);
         timeGrid1.Visibility = show(!nd);
+        taskStartRow.Visibility = show(task && !nd);
         timeGrid2.Visibility = show(!task);
         repeatRow.Visibility = show(!task);
         remindRow.Visibility = show(!nd);
@@ -252,7 +258,7 @@ public class EventDialog : BaseDialog
         var rv = Reminds[Math.Max(remind.SelectedIndex, 0)].value;
         remindCustomField.Visibility = rv == -1 ? Visibility.Visible : Visibility.Hidden;
         bool noTime = task ? string.IsNullOrWhiteSpace(tStart.Text) : ad;
-        remindNote.Text = task ? "時刻のないタスクは、期限の日の 9:00 を基準に通知します。" : "終日の予定は、その日の 9:00 を基準に通知します。";
+        remindNote.Text = task ? "時刻のないタスクは、終了日（期限）の 9:00 を基準に通知します。" : "終日の予定は、その日の 9:00 を基準に通知します。";
         remindNote.Visibility = show(!nd && noTime && rv != null);
     }
 
@@ -297,11 +303,13 @@ public class EventDialog : BaseDialog
     void SaveTask(string t)
     {
         bool nd = noDue.IsChecked == true;
-        string date = "";
+        string date = "", due = "";
         if (!nd)
         {
-            if (dStart.SelectedDate is not DateTime ds) { Warn("期限を選ぶか「期限なし」にしてください"); return; }
-            date = Dates.F(DateOnly.FromDateTime(ds));
+            if (dStart.SelectedDate is not DateTime ds) { Warn("終了日（期限）を選ぶか「期限なし」にしてください"); return; }
+            due = Dates.F(DateOnly.FromDateTime(ds));
+            date = dTaskStart.SelectedDate is DateTime dts ? Dates.F(DateOnly.FromDateTime(dts)) : due;
+            if (string.CompareOrdinal(date, due) > 0) { Warn("開始日が終了日より後になっています"); return; }
         }
         var ts = date == "" ? "" : NormTime(tStart.Text);
         if (ts == null) { Warn("時刻は 9:30 や 14:00 のように入れてください"); return; }
@@ -313,13 +321,13 @@ public class EventDialog : BaseDialog
         }
         bool isDone = done.IsChecked == true;
         var ev = existing?.Clone() ?? new CalEvent { Id = NewId() };
-        ev.Kind = "task"; ev.Title = t; ev.Date = date; ev.EndDate = date; ev.AllDay = ts == "";
+        ev.Kind = "task"; ev.Title = t; ev.Date = date; ev.EndDate = due; ev.AllDay = ts == "";
         ev.Start = ts; ev.End = ""; ev.Repeat = "none"; ev.Until = ""; ev.Exdates = new List<string>();
         ev.Color = color; ev.Memo = memo.Text; ev.Remind = rem;
         ev.DoneAt = isDone ? (existing?.Done == true ? existing.DoneAt : Store.Now()) : null;
         ev.Done = isDone;
         ev.Deleted = false; ev.UpdatedAt = Store.Now();
-        Result = ev; JumpToDate = date != "";
+        Result = ev; JumpToDate = due != "";
         Close();
     }
 

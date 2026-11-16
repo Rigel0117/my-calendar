@@ -75,6 +75,9 @@ main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:0 16px 16px;m
 .span-bar.head{border-top-left-radius:5px;border-bottom-left-radius:5px}
 .span-bar.tail{border-top-right-radius:5px;border-bottom-right-radius:5px}
 .span-bar:hover{filter:brightness(1.08)}
+.span-bar.task.done{opacity:.5;text-decoration:line-through}
+.span-bar .ck{display:inline-block;width:9px;height:9px;border:1.5px solid #fff;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.span-bar.done .ck{background:#fff}
 .span-bar .cont{font-size:8px;opacity:.8;margin-right:4px;vertical-align:1px}
 .lane-space{flex:none}
 .day{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:4px 4px 2px;min-width:0;min-height:0;overflow:hidden;
@@ -262,6 +265,10 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0}
     <div class="field"><label for="fTitle">タイトル</label><input type="text" id="fTitle" class="title-input" placeholder="例：歯医者" required maxlength="200"></div>
     <label class="toggle ev-only"><input type="checkbox" id="fAllDay"> 終日</label>
     <label class="toggle task-only"><input type="checkbox" id="fNoDue"> 期限なし</label>
+    <div class="row task-only" id="taskStartRow">
+      <div class="field"><label for="fTaskStart">開始日（任意）</label><input type="date" id="fTaskStart"></div>
+      <div class="field"></div>
+    </div>
     <div class="row" id="dateRow">
       <div class="field"><label for="fDate" id="fDateLbl">開始日</label><input type="date" id="fDate"></div>
       <div class="field timef"><label for="fStart" id="fStartLbl">開始時刻</label><input type="time" id="fStart" step="300"></div>
@@ -381,8 +388,14 @@ const live=()=>Object.values(store.events).filter(e=>!e.deleted);
 const isTask=e=>e.kind==="task";
 const liveEvents=()=>live().filter(e=>!isTask(e)&&e.date);
 const allTasks=()=>live().filter(isTask);
-const taskSort=(a,b)=>(a.done-b.done)||(a.date||"9999").localeCompare(b.date||"9999")||(a.start||"99").localeCompare(b.start||"99")||a.title.localeCompare(b.title);
-const tasksOn=s=>allTasks().filter(t=>t.date===s).sort(taskSort);
+/* タスクの期限（＝終了日）。開始日がある場合は date が開始日、endDate が終了日 */
+const dueOf=t=>t.endDate||t.date||"";
+const isSpanTask=t=>!!t.date&&t.date<dueOf(t);
+const taskSort=(a,b)=>(a.done-b.done)||(dueOf(a)||"9999").localeCompare(dueOf(b)||"9999")||(a.start||"99").localeCompare(b.start||"99")||a.title.localeCompare(b.title);
+// カレンダーのマスに出すタスク（1日だけのもの。期間のあるタスクはバーで出す）
+const tasksOn=s=>allTasks().filter(t=>dueOf(t)===s&&!isSpanTask(t)).sort(taskSort);
+// その日に取り組むタスク（開始日〜終了日の間）
+const tasksActiveOn=s=>allTasks().filter(t=>t.date&&t.date<=s&&s<=dueOf(t)).sort(taskSort);
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 
 /* 予定がその日に入っているか（繰り返し・複数日に対応） */
@@ -416,7 +429,7 @@ const isMobile=()=>matchMedia("(max-width:860px)").matches;
 /* 1週間分の「連日の予定」を、重ならないように段（レーン）に並べる */
 function weekLayout(wStart){
   const wEnd=addDays(wStart,6), segs=[], seen=new Set();
-  for(const e of liveEvents()){
+  for(const e of [...liveEvents(),...allTasks().filter(isSpanTask)]){
     const span=spanOf(e); if(!span) continue;
     for(let c=0;c<7;c++){
       const st=occurrenceStart(e,addDays(wStart,c)); if(!st) continue;
@@ -508,14 +521,14 @@ function render(){
     for(const x of segs){
       if(x.lane>=vis) continue;
       const bar=document.createElement("div");
-      bar.className="span-bar"+(x.head?" head":"")+(x.tail?" tail":"");
+      bar.className="span-bar"+(x.head?" head":"")+(x.tail?" tail":"")+(isTask(x.e)?" task"+(x.e.done?" done":""):"");
       bar.style.setProperty("--c",x.e.color||"#3b6fd4");
       bar.style.left=`calc(${x.c0}*100%/7 + 3px)`;
       bar.style.width=`calc(${x.c1-x.c0+1}*100%/7 - 7px)`;
       bar.style.top=(TOP+x.lane*LANE)+"px";
       bar.dataset.id=x.e.id; bar.dataset.st=x.st;
       const tl=!x.e.allDay&&x.head&&x.e.start?`<b>${esc(x.e.start)}</b> `:"";
-      bar.innerHTML=(x.head?"":"<span class=\"cont\">◀</span>")+tl+esc(x.e.title);
+      bar.innerHTML=(x.head?"":"<span class=\"cont\">◀</span>")+(isTask(x.e)?"<span class=\"ck\"></span>":tl)+esc(x.e.title);
       bar.title=`${x.e.title}（${fmtMD(x.st)}〜${fmtMD(x.en)}）`;
       week.appendChild(bar);
     }
@@ -527,9 +540,9 @@ function renderSide(){
   const d=parse(selected), hn=holidayName(selected);
   $("sideDate").textContent=(d.getMonth()+1)+"/"+d.getDate();
   $("sideSub").innerHTML=`${d.getFullYear()}年・${WD[d.getDay()]}曜日${selected===today?"・今日":""}${hn?`<br><span class="h">${hn}</span>`:""}`;
-  const evs=eventsOn(selected), ts=tasksOn(selected);
+  const evs=eventsOn(selected), ts=[...tasksActiveOn(selected),...allTasks().filter(t=>!t.date&&dueOf(t)===selected)].sort(taskSort);
   let html=evs.map(({e,st})=>itemHTML(e,st,selected,timeLabel(e,st,selected))).join("");
-  if(ts.length) html+=`<div class="group-h">タスク</div>`+ts.map(t=>taskHTML(t,false)).join("");
+  if(ts.length) html+=`<div class="group-h">タスク</div>`+ts.map(t=>taskHTML(t,isSpanTask(t))).join("");
   $("list").innerHTML=html||`<div class="empty">予定はありません</div>`;
   renderTasks();
 }
@@ -545,11 +558,12 @@ function setTab(t){
 $("tabDay").onclick=()=>setTab("day");
 $("tabTasks").onclick=()=>setTab("tasks");
 function dueLabel(t){
-  if(!t.date) return "期限なし";
-  const d=parse(t.date), dd=diffDays(today,t.date);
+  const due=dueOf(t);
+  if(!due) return "期限なし";
+  const d=parse(due), dd=diffDays(today,due);
   const rel=dd===0?"今日":dd===1?"明日":dd===-1?"昨日":"";
-  const txt=`${rel||`${d.getMonth()+1}/${d.getDate()}(${WD[d.getDay()]})`}${t.start?" "+t.start:""}`;
-  return !t.done&&t.date<today?`<span class="over">期限切れ：${txt}</span>`:"期限："+txt;
+  const txt=`${isSpanTask(t)?fmtMD(t.date)+"〜":""}${rel||`${d.getMonth()+1}/${d.getDate()}(${WD[d.getDay()]})`}${t.start?" "+t.start:""}`;
+  return !t.done&&due<today?`<span class="over">期限切れ：${txt}</span>`:(isSpanTask(t)?"期間：":"期限：")+txt;
 }
 function taskHTML(t,showDue=true){
   const meta=[showDue?dueLabel(t):(t.start?t.start+"まで":""),hasRemind(t)?`通知：${remindLabel(+t.remind)}`:"",t.memo?esc(t.memo.split("\n")[0]).slice(0,60):""].filter(Boolean).join("　");
@@ -560,8 +574,8 @@ function taskHTML(t,showDue=true){
 function renderTasks(){
   const ts=allTasks();
   const open=ts.filter(t=>!t.done).sort(taskSort);
-  const over=open.filter(t=>t.date&&t.date<today), tod=open.filter(t=>t.date===today),
-        later=open.filter(t=>t.date&&t.date>today), nodue=open.filter(t=>!t.date);
+  const over=open.filter(t=>dueOf(t)&&dueOf(t)<today), tod=open.filter(t=>dueOf(t)===today),
+        later=open.filter(t=>dueOf(t)>today), nodue=open.filter(t=>!dueOf(t));
   const done=ts.filter(t=>t.done).sort((a,b)=>(b.doneAt||0)-(a.doneAt||0)).slice(0,30);
   const grp=(h,list,cls="")=>list.length?`<div class="group-h ${cls}">${h}（${list.length}）</div>`+list.map(t=>taskHTML(t)).join(""):"";
   const html=grp("期限切れ",over,"over")+grp("今日",tod)+grp("これから",later)+grp("期限なし",nodue)+grp("完了",done);
@@ -631,7 +645,7 @@ function setKind(k){
   editKind=k;
   $("evForm").classList.toggle("task-mode",k==="task");
   $("kindSeg").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.k===k));
-  $("fDateLbl").textContent=k==="task"?"期限":"開始日";
+  $("fDateLbl").textContent=k==="task"?"終了日（期限）":"開始日";
   $("fStartLbl").textContent=k==="task"?"時刻（任意）":"開始時刻";
   $("fTitle").placeholder=k==="task"?"例：レポートを出す":"例：歯医者";
   $("evDlgTitle").textContent=(k==="task"?"タスク":"予定")+(editing?"を編集":"を追加");
@@ -642,6 +656,7 @@ $("fNoDue").onchange=()=>{syncAllDay();syncRemind();};
 function syncAllDay(){
   const task=editKind==="task", noDue=task&&$("fNoDue").checked;
   $("dateRow").style.display=noDue?"none":"";
+  $("taskStartRow").style.display=noDue?"none":"";
   document.querySelectorAll(".timef").forEach(f=>f.style.display=!task&&$("fAllDay").checked?"none":"");
 }
 const REMIND_PRESETS=["0","5","10","15","30","60","120","1440","2880","10080"];
@@ -659,7 +674,7 @@ function syncRemind(){
   $("remindCustomField").style.visibility=v==="custom"?"visible":"hidden";
   const task=editKind==="task";
   $("remindRow").style.display=task&&$("fNoDue").checked?"none":"";
-  $("remindNote").textContent=task?"時刻のないタスクは、期限の日の 9:00 を基準に通知します。":"終日の予定は、その日の 9:00 を基準に通知します。通知は Discord と Windows版のアプリに届きます。";
+  $("remindNote").textContent=task?"時刻のないタスクは、終了日（期限）の 9:00 を基準に通知します。":"終日の予定は、その日の 9:00 を基準に通知します。通知は Discord と Windows版のアプリに届きます。";
   $("remindNote").style.display=v!=="none"&&(task?!$("fNoDue").checked&&!$("fStart").value:$("fAllDay").checked)?"":"none";
 }
 $("fRemind").onchange=()=>{syncRemind(); if($("fRemind").value==="custom") $("fRemindCustom").focus();};
@@ -676,7 +691,9 @@ function openEditor(id,date,st,kind){
   $("fTitle").value=e?e.title:"";
   $("fAllDay").checked=e?!!e.allDay:false;
   $("fDate").value=e&&e.date?e.date:date; $("fEndDate").value=e&&e.date?(e.endDate||e.date):date;
-  $("fNoDue").checked=e?(isTask(e)&&!e.date):(k==="task"&&sideTab==="tasks");
+  $("fNoDue").checked=e?(isTask(e)&&!dueOf(e)):(k==="task"&&sideTab==="tasks");
+  if(e&&isTask(e)&&dueOf(e)) $("fDate").value=dueOf(e);
+  $("fTaskStart").value=e&&isTask(e)&&isSpanTask(e)?e.date:"";
   $("fDone").checked=!!(e&&e.done);
   let defStart="10:00"; if(!e && date===today){const n=new Date();defStart=pad(Math.min(n.getHours()+1,23))+":00";}
   $("fStart").value=e?(e.start||""):(k==="task"?"":defStart);
@@ -724,18 +741,20 @@ function readRemind(){
 }
 function saveTask(title){
   const noDue=$("fNoDue").checked;
-  const date=noDue?"":$("fDate").value;
-  if(!noDue&&!date){ toast("期限を入れるか「期限なし」にしてください"); return; }
-  const start=date?$("fStart").value:"";
-  let remind=date?readRemind():null;
+  const due=noDue?"":$("fDate").value;
+  if(!noDue&&!due){ toast("終了日（期限）を入れるか「期限なし」にしてください"); return; }
+  const date=noDue?"":($("fTaskStart").value||due);
+  if(date>due){ toast("開始日が終了日より後になっています"); $("fTaskStart").focus(); return; }
+  const start=due?$("fStart").value:"";
+  let remind=due?readRemind():null;
   if(remind===undefined){ toast("通知は 0〜43200 分前の間で入れてください"); $("fRemindCustom").focus(); return; }
   const done=$("fDone").checked;
   const base=editing?{...editing}:{id:uid()};
-  const t={...base,kind:"task",title,date,endDate:date,allDay:!start,start,end:"",repeat:"none",until:"",exdates:[],remind,
+  const t={...base,kind:"task",title,date,endDate:due,allDay:!start,start,end:"",repeat:"none",until:"",exdates:[],remind,
     color:pickedColor,memo:$("fMemo").value,done,doneAt:done?(editing&&editing.done?editing.doneAt:Date.now()):null,updatedAt:Date.now(),deleted:false};
   store.events[t.id]=t; changed();
   $("evDlg").classList.remove("open");
-  if(date&&sideTab==="day"){ selected=date; const d=parse(date); view={y:d.getFullYear(),m:d.getMonth()}; }
+  if(due&&sideTab==="day"){ selected=due; const d=parse(due); view={y:d.getFullYear(),m:d.getMonth()}; }
   render(); toast("保存しました");
 }
 $("delBtn").onclick=()=>{ if(!editing) return; if(!confirmTwice($("delBtn"))) return;
