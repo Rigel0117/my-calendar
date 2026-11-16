@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>マイカレンダー</title>
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16181d" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="カレンダー">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+/* 方針: 紙の手帳。インクの紺で文字、朱色で「今日」、日曜・祝日は赤、土曜は青。
+   レイアウト: PCは「月グリッド＋右に選択日の予定」、スマホは「月グリッド＋下に選択日の予定」 */
+:root{
+  --paper:#f6f5f1; --sheet:#ffffff; --ink:#1f2633; --muted:#6b7280; --line:#e3e1da;
+  --accent:#d9452b; --accent-ink:#ffffff; --sun:#c8372d; --sat:#2f5fb3; --soft:#efede6;
+  --font-body:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  --font-num:"SF Pro Rounded","Avenir Next","Segoe UI",var(--font-body);
+  --radius:10px; --shadow:0 8px 30px rgba(20,24,33,.14);
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#16181d; --sheet:#1e2128; --ink:#e8e6e1; --muted:#9aa0aa; --line:#2e323b;
+    --accent:#ef6a4f; --accent-ink:#1a1a1a; --sun:#f07a6c; --sat:#7fa6ee; --soft:#262a32;
+    --shadow:0 8px 30px rgba(0,0,0,.5); color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#16181d; --sheet:#1e2128; --ink:#e8e6e1; --muted:#9aa0aa; --line:#2e323b;
+  --accent:#ef6a4f; --accent-ink:#1a1a1a; --sun:#f07a6c; --sat:#7fa6ee; --soft:#262a32;
+  --shadow:0 8px 30px rgba(0,0,0,.5); color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.5;
+  -webkit-tap-highlight-color:transparent;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.app{height:100%;display:grid;grid-template-rows:auto 1fr;max-width:1400px;margin:0 auto}
+
+/* ヘッダー */
+header{display:flex;align-items:center;gap:8px;padding:10px 16px;flex-wrap:wrap}
+.month-title{font-family:var(--font-num);font-size:22px;font-weight:700;letter-spacing:.02em;margin:0 4px;
+  font-variant-numeric:tabular-nums;min-width:8.5em}
+.month-title small{font-size:14px;font-weight:500;color:var(--muted);margin-left:2px}
+.icon-btn{border:1px solid var(--line);background:var(--sheet);border-radius:8px;height:36px;min-width:36px;padding:0 10px;
+  display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.icon-btn:hover{background:var(--soft)}
+.icon-btn svg{width:18px;height:18px}
+.spacer{flex:1}
+.sync-pill{border:1px solid var(--line);background:var(--sheet);border-radius:999px;height:32px;padding:0 12px;font-size:12.5px;
+  display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
+.sync-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.sync-pill.ok .dot{background:#2e9d5b}.sync-pill.pending .dot{background:#d99a1e}.sync-pill.err .dot{background:var(--sun)}
+.sync-pill.busy .dot{animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.25}}
+
+/* 本体 */
+main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:0 16px 16px;min-height:0}
+.cal{background:var(--sheet);border:1px solid var(--line);border-radius:var(--radius);display:grid;grid-template-rows:auto 1fr;min-height:0;overflow:hidden;touch-action:pan-y}
+.dow{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);text-align:center}
+.dow div{padding:6px 0}
+.dow .su{color:var(--sun)}.dow .sa{color:var(--sat)}
+.grid{display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:1fr;min-height:0}
+.day{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:4px 4px 2px;min-width:0;min-height:0;overflow:hidden;
+  background:none;border-top:0;border-left:0;text-align:left;display:flex;flex-direction:column;gap:2px;position:relative}
+.day:nth-child(7n){border-right:0}
+.day:hover{background:var(--soft)}
+.day.other{background:color-mix(in srgb,var(--soft) 55%,transparent)}
+.day.other .num{opacity:.45}
+.day.sel{box-shadow:inset 0 0 0 2px var(--ink)}
+.num-row{display:flex;align-items:center;gap:4px;min-width:0}
+.num{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:13px;font-weight:600;width:24px;height:24px;border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;flex:none}
+.day.su .num,.day.hol .num{color:var(--sun)}
+.day.sa:not(.hol) .num{color:var(--sat)}
+.day.today .num{background:var(--accent);color:var(--accent-ink)}
+.hol-name{font-size:10px;color:var(--sun);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip{font-size:11.5px;line-height:1.35;border-radius:4px;padding:1px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  background:color-mix(in srgb,var(--c) 16%,transparent);border-left:3px solid var(--c)}
+.chip.allday{background:var(--c);color:#fff;border-left:0}
+.more{font-size:11px;color:var(--muted);padding-left:4px}
+.dots{display:none;gap:3px;flex-wrap:wrap;padding-left:2px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--c)}
+
+/* 選択日の予定 */
+.side{background:var(--sheet);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.side-head{padding:14px 16px 10px;border-bottom:1px solid var(--line);display:flex;align-items:flex-end;gap:10px}
+.side-date{font-family:var(--font-num);font-size:30px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.side-sub{font-size:13px;color:var(--muted)}
+.side-sub .h{color:var(--sun)}
+.list{overflow:auto;padding:8px;display:flex;flex-direction:column;gap:6px;flex:1}
+.item{display:grid;grid-template-columns:4px 88px 1fr;gap:10px;align-items:start;padding:10px;border-radius:8px;border:0;background:none;text-align:left;width:100%}
+.item:hover{background:var(--soft)}
+.item .bar{width:4px;align-self:stretch;border-radius:2px;background:var(--c)}
+.item .t{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.item .ti{font-weight:600;word-break:break-word}
+.item .memo{font-size:12.5px;color:var(--muted);white-space:pre-wrap;word-break:break-word;margin-top:2px}
+.item .rep{font-size:11px;color:var(--muted)}
+.empty{color:var(--muted);text-align:center;padding:28px 12px;font-size:14px}
+.add-btn{margin:8px;border:0;border-radius:8px;background:var(--ink);color:var(--paper);padding:12px;font-weight:600}
+.fab{display:none}
+
+/* ダイアログ */
+.backdrop{position:fixed;inset:0;background:rgba(10,12,18,.45);display:none;align-items:center;justify-content:center;z-index:20;padding:16px}
+.backdrop.open{display:flex}
+.sheet{background:var(--sheet);border-radius:14px;box-shadow:var(--shadow);width:min(520px,100%);max-height:calc(100% - 32px);overflow:auto;padding:18px}
+.sheet h2{margin:0 0 14px;font-size:17px}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.field label,.lbl{font-size:12.5px;color:var(--muted)}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>.field{flex:1;min-width:130px}
+input[type=text],input[type=date],input[type=time],input[type=password],input[type=search],select,textarea{
+  border:1px solid var(--line);background:var(--paper);border-radius:8px;padding:9px 10px;width:100%;min-height:40px}
+textarea{min-height:70px;resize:vertical}
+.title-input{font-size:18px;font-weight:600}
+.toggle{display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:12px}
+.toggle input{width:18px;height:18px;accent-color:var(--accent)}
+.swatches{display:flex;gap:8px;flex-wrap:wrap}
+.sw{width:30px;height:30px;border-radius:50%;border:2px solid transparent;background:var(--c);padding:0}
+.sw[aria-pressed="true"]{box-shadow:0 0 0 2px var(--sheet),0 0 0 4px var(--c)}
+.actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px}
+.btn{border:1px solid var(--line);background:var(--sheet);border-radius:8px;padding:9px 16px;font-weight:600}
+.btn.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.btn.danger{color:var(--sun);border-color:color-mix(in srgb,var(--sun) 40%,var(--line))}
+.btn:disabled{opacity:.5;cursor:default}
+.actions .left{margin-right:auto;display:flex;gap:8px;flex-wrap:wrap}
+.note{font-size:12.5px;color:var(--muted);margin:4px 0 12px}
+.note a{color:var(--sat)}
+.status-box{background:var(--soft);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:12px;word-break:break-all}
+hr{border:0;border-top:1px solid var(--line);margin:16px 0}
+.results{display:flex;flex-direction:column;gap:4px;max-height:55vh;overflow:auto}
+.results .item{grid-template-columns:4px 96px 1fr}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--paper);
+  padding:10px 16px;border-radius:999px;font-size:13.5px;z-index:30;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.show{opacity:1}
+
+/* スマホ */
+@media (max-width: 860px){
+  header{padding:8px 12px;gap:6px}
+  header{gap:5px}
+  .icon-btn,.sync-pill{flex:none}
+  .icon-btn{min-width:34px;padding:0 8px}
+  .month-title{font-size:21px;line-height:1.05;min-width:0;flex:1;white-space:nowrap;order:-1;margin:0 0 0 2px}
+  .month-title .y{display:block;font-size:11px;font-weight:600;color:var(--muted)}
+  #syncText{display:none}
+  .sync-pill{width:36px;height:36px;padding:0;justify-content:center}
+  .sync-pill .dot{width:10px;height:10px}
+  .hide-sm{display:none}
+  main{grid-template-columns:1fr;grid-template-rows:auto 1fr;padding:0 12px 12px;gap:10px}
+  .cal{height:auto}
+  .grid{grid-auto-rows:52px}
+  .day{padding:3px 2px;align-items:center}
+  .num-row{justify-content:center}
+  .chip,.more,.hol-name{display:none}
+  .dots{display:flex;justify-content:center}
+  .side-date{font-size:24px}
+  .add-btn{display:none}
+  .fab{display:flex;position:fixed;right:calc(18px + env(safe-area-inset-right));bottom:calc(18px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;
+    border:0;background:var(--accent);color:var(--accent-ink);box-shadow:var(--shadow);align-items:center;justify-content:center;z-index:10}
+  .fab svg{width:26px;height:26px}
+  .list{padding-bottom:84px}
+  .backdrop{align-items:flex-end;padding:0}
+  .sheet{border-radius:16px 16px 0 0;width:100%;max-height:92%;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <button class="icon-btn" id="prev" aria-label="前の月"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <h1 class="month-title" id="title"></h1>
+    <button class="icon-btn" id="next" aria-label="次の月"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg></button>
+    <button class="icon-btn" id="today">今日</button>
+    <span class="spacer hide-sm"></span>
+    <button class="sync-pill" id="syncPill" aria-label="同期の状態と設定"><span class="dot"></span><span id="syncText">端末に保存</span></button>
+    <button class="icon-btn" id="searchBtn" aria-label="予定を検索"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button>
+    <button class="icon-btn" id="settingsBtn" aria-label="設定"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+  </header>
+  <main>
+    <section class="cal" id="cal" aria-label="月のカレンダー">
+      <div class="dow" id="dow"></div>
+      <div class="grid" id="grid"></div>
+    </section>
+    <aside class="side" aria-label="選択した日の予定">
+      <div class="side-head"><div class="side-date" id="sideDate"></div><div class="side-sub" id="sideSub"></div></div>
+      <div class="list" id="list"></div>
+      <button class="add-btn" id="addBtn">＋ この日に予定を追加</button>
+    </aside>
+  </main>
+</div>
+<button class="fab" id="fab" aria-label="予定を追加"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+
+<!-- 予定の編集 -->
+<div class="backdrop" id="evDlg" role="dialog" aria-modal="true" aria-labelledby="evDlgTitle">
+  <form class="sheet" id="evForm" autocomplete="off">
+    <h2 id="evDlgTitle">予定を追加</h2>
+    <div class="field"><label for="fTitle">タイトル</label><input type="text" id="fTitle" class="title-input" placeholder="例：歯医者" required maxlength="200"></div>
+    <label class="toggle"><input type="checkbox" id="fAllDay"> 終日</label>
+    <div class="row">
+      <div class="field"><label for="fDate">開始日</label><input type="date" id="fDate" required></div>
+      <div class="field timef"><label for="fStart">開始時刻</label><input type="time" id="fStart" step="300"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label for="fEndDate">終了日</label><input type="date" id="fEndDate" required></div>
+      <div class="field timef"><label for="fEnd">終了時刻</label><input type="time" id="fEnd" step="300"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label for="fRepeat">繰り返し</label>
+        <select id="fRepeat"><option value="none">なし</option><option value="daily">毎日</option><option value="weekly">毎週</option><option value="monthly">毎月（同じ日）</option><option value="yearly">毎年</option></select></div>
+      <div class="field" id="untilField"><label for="fUntil">繰り返しの終了日（任意）</label><input type="date" id="fUntil"></div>
+    </div>
+    <div class="field"><span class="lbl">色</span><div class="swatches" id="swatches"></div></div>
+    <div class="field"><label for="fMemo">メモ</label><textarea id="fMemo" maxlength="5000" placeholder="場所や持ち物など"></textarea></div>
+    <div class="actions">
+      <div class="left">
+        <button type="button" class="btn danger" id="delBtn">削除</button>
+        <button type="button" class="btn danger" id="delOneBtn">この日だけ削除</button>
+      </div>
+      <button type="button" class="btn" id="cancelBtn">キャンセル</button>
+      <button type="submit" class="btn primary">保存</button>
+    </div>
+  </form>
+</div>
+
+<!-- 検索 -->
+<div class="backdrop" id="searchDlg" role="dialog" aria-modal="true" aria-labelledby="searchTitle">
+  <div class="sheet">
+    <h2 id="searchTitle">予定を検索</h2>
+    <div class="field"><label for="q">タイトル・メモに含まれる言葉</label><input type="search" id="q" placeholder="例：会議"></div>
+    <div class="results" id="results"></div>
+    <div class="actions"><button type="button" class="btn" data-close>閉じる</button></div>
+  </div>
+</div>
+
+<!-- 設定 -->
+<div class="backdrop" id="setDlg" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+  <div class="sheet">
+    <h2 id="setTitle">設定と同期</h2>
+    <div class="status-box" id="syncStatus"></div>
+    <div class="field"><label for="token">GitHubトークン（gist 権限のみ）</label><input type="password" id="token" placeholder="ghp_..." autocomplete="off" spellcheck="false"></div>
+    <p class="note">PCとスマホに同じトークンを入れると、ネットにつながった時に自動で同期します。ネットが無い間は端末に保存され、つながった時にまとめて送られます。トークンはこの端末の中だけに保存されます。</p>
+    <div class="actions">
+      <div class="left"><button type="button" class="btn danger" id="unlinkBtn">同期をやめる</button></div>
+      <button type="button" class="btn primary" id="linkBtn">保存して同期</button>
+    </div>
+    <hr>
+    <div class="row">
+      <div class="field"><label for="weekStart">週のはじまり</label><select id="weekStart"><option value="0">日曜日</option><option value="1">月曜日</option></select></div>
+      <div class="field"><label for="theme">表示テーマ</label><select id="theme"><option value="">端末に合わせる</option><option value="light">ライト</option><option value="dark">ダーク</option></select></div>
+    </div>
+    <span class="lbl">バックアップ</span>
+    <div class="actions" style="justify-content:flex-start">
+      <button type="button" class="btn" id="exportBtn">ファイルに書き出す</button>
+      <label class="btn" for="importFile" style="display:inline-flex;align-items:center">ファイルから読み込む</label>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </div>
+    <hr>
+    <div class="actions"><button type="button" class="btn" data-close>閉じる</button></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+/* ========== 日付ユーティリティ ========== */
+const pad=n=>String(n).padStart(2,"0");
+const ymd=d=>d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+const parse=s=>{const [y,m,d]=s.split("-").map(Number);return new Date(y,m-1,d);};
+const addDays=(s,n)=>{const d=parse(s);d.setDate(d.getDate()+n);return ymd(d);};
+const diffDays=(a,b)=>Math.round((parse(b)-parse(a))/86400000);
+const WD=["日","月","火","水","木","金","土"];
+
+/* ========== 日本の祝日（2020年以降の法律に基づく計算） ========== */
+const holCache={};
+function holidays(y){
+  if(holCache[y]) return holCache[y];
+  const h={};
+  const nthMon=(m,n)=>{const d=new Date(y,m-1,1);const off=(8-d.getDay())%7;return ymd(new Date(y,m-1,1+off+7*(n-1)));};
+  const f=(m,d,name)=>h[y+"-"+pad(m)+"-"+pad(d)]=name;
+  const t=y-1980, q=Math.floor(t/4);
+  f(1,1,"元日"); h[nthMon(1,2)]="成人の日"; f(2,11,"建国記念の日");
+  if(y>=2020) f(2,23,"天皇誕生日");
+  f(3,Math.floor(20.8431+0.242194*t-q),"春分の日");
+  f(4,29,"昭和の日"); f(5,3,"憲法記念日"); f(5,4,"みどりの日"); f(5,5,"こどもの日");
+  h[nthMon(7,3)]="海の日"; f(8,11,"山の日"); h[nthMon(9,3)]="敬老の日";
+  f(9,Math.floor(23.2488+0.242194*t-q),"秋分の日");
+  h[nthMon(10,2)]="スポーツの日"; f(11,3,"文化の日"); f(11,23,"勤労感謝の日");
+  // 国民の休日（祝日に挟まれた平日）
+  Object.keys(h).forEach(k=>{const mid=addDays(k,1),nx=addDays(k,2);
+    if(h[nx]&&!h[mid]&&parse(mid).getDay()!==0) h[mid]="国民の休日";});
+  // 振替休日
+  Object.keys(h).sort().forEach(k=>{ if(parse(k).getDay()===0 && h[k]!=="振替休日"){
+    let d=addDays(k,1); while(h[d]) d=addDays(d,1); h[d]="振替休日"; }});
+  return holCache[y]=h;
+}
+const holidayName=s=>holidays(+s.slice(0,4))[s]||"";
+
+/* ========== データ ========== */
+const KEY="mycal.v1";
+const COLORS=["#3b6fd4","#d9452b","#2e9d5b","#d99a1e","#8a55c9","#1a9aa8","#c24f8e","#6b7280"];
+let store=load();
+function load(){
+  try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.events) return s;}catch(e){}
+  return {events:{},settings:{weekStart:0,theme:""},sync:{token:"",gistId:"",last:0,dirty:false}};
+}
+function save(){ try{localStorage.setItem(KEY,JSON.stringify(store));}catch(e){toast("この端末に保存できませんでした");} }
+const live=()=>Object.values(store.events).filter(e=>!e.deleted);
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+
+/* 予定がその日に入っているか（繰り返し・複数日に対応） */
+function isStart(e,s){
+  if(s<e.date) return false;
+  if(e.until && s>e.until) return false;
+  if(e.exdates && e.exdates.includes(s)) return false;
+  if(s===e.date) return true;
+  const a=parse(e.date), b=parse(s);
+  switch(e.repeat){
+    case "daily": return true;
+    case "weekly": return a.getDay()===b.getDay();
+    case "monthly": return a.getDate()===b.getDate();
+    case "yearly": return a.getDate()===b.getDate()&&a.getMonth()===b.getMonth();
+    default: return false;
+  }
+}
+function occurrenceStart(e,s){ // sの日に表示されるなら、その回の開始日を返す
+  const span=Math.min(Math.max(diffDays(e.date,e.endDate||e.date),0),62);
+  for(let k=0;k<=span;k++){const st=addDays(s,-k); if(isStart(e,st)) return st;}
+  return null;
+}
+function eventsOn(s){
+  const key=({e,st})=>e.allDay?"0":st<s?"1":"2"+(e.start||"");
+  return live().map(e=>{const st=occurrenceStart(e,s); return st?{e,st}:null;}).filter(Boolean)
+    .sort((x,y)=>key(x).localeCompare(key(y))||x.e.title.localeCompare(y.e.title));
+}
+function timeLabel(e,st,s){
+  if(e.allDay) return "終日";
+  const span=diffDays(e.date,e.endDate||e.date), en=addDays(st,span);
+  if(span===0) return (e.start||"")+(e.end?"–"+e.end:"");
+  if(s===st) return (e.start||"")+"〜";
+  if(s===en) return "〜"+(e.end||"");
+  return "終日";
+}
+
+/* ========== 描画 ========== */
+const $=id=>document.getElementById(id);
+let today=ymd(new Date());
+let view=(()=>{const d=new Date();return {y:d.getFullYear(),m:d.getMonth()};})();
+let selected=today;
+
+function applyTheme(){ const t=store.settings.theme; if(t) document.documentElement.dataset.theme=t; else delete document.documentElement.dataset.theme; }
+
+function render(){
+  today=ymd(new Date());
+  const ws=+store.settings.weekStart||0;
+  $("title").innerHTML=`<span class="y">${view.y}年 </span>${view.m+1}月`;
+  $("dow").innerHTML=[0,1,2,3,4,5,6].map(i=>{const w=(i+ws)%7;return `<div class="${w===0?"su":w===6?"sa":""}">${WD[w]}</div>`;}).join("");
+  const first=new Date(view.y,view.m,1);
+  const lead=(first.getDay()-ws+7)%7;
+  const start=ymd(new Date(view.y,view.m,1-lead));
+  const days=Math.ceil((lead+new Date(view.y,view.m+1,0).getDate())/7)*7;
+  const g=$("grid"); g.style.gridTemplateRows=""; g.innerHTML="";
+  const cellH=g.clientHeight/(days/7);
+  const maxChips=Math.max(1,Math.floor((cellH-34)/19));
+  for(let i=0;i<days;i++){
+    const s=addDays(start,i), d=parse(s), w=d.getDay(), hn=holidayName(s);
+    const evs=eventsOn(s);
+    const b=document.createElement("button");
+    b.type="button";
+    b.className="day"+(d.getMonth()!==view.m?" other":"")+(w===0?" su":"")+(w===6?" sa":"")+(hn?" hol":"")+(s===today?" today":"")+(s===selected?" sel":"");
+    b.dataset.date=s;
+    b.setAttribute("aria-label",`${d.getMonth()+1}月${d.getDate()}日 ${hn} 予定${evs.length}件`);
+    let html=`<div class="num-row"><span class="num">${d.getDate()}</span>${hn?`<span class="hol-name">${hn}</span>`:""}</div>`;
+    const shown=evs.slice(0, evs.length>maxChips?maxChips-1:maxChips);
+    html+=shown.map(({e,st})=>{const tl=e.allDay||st!==s?"":(e.start||"");
+      return `<div class="chip${e.allDay?" allday":""}" style="--c:${esc(e.color)}">${tl?`<b>${tl}</b> `:""}${esc(e.title)}</div>`;}).join("");
+    if(evs.length>shown.length) html+=`<div class="more">ほか${evs.length-shown.length}件</div>`;
+    html+=`<div class="dots">${evs.slice(0,4).map(({e})=>`<i style="--c:${esc(e.color)}"></i>`).join("")}</div>`;
+    b.innerHTML=html;
+    g.appendChild(b);
+  }
+  renderSide();
+}
+function renderSide(){
+  const d=parse(selected), hn=holidayName(selected);
+  $("sideDate").textContent=(d.getMonth()+1)+"/"+d.getDate();
+  $("sideSub").innerHTML=`${d.getFullYear()}年・${WD[d.getDay()]}曜日${selected===today?"・今日":""}${hn?`<br><span class="h">${hn}</span>`:""}`;
+  const evs=eventsOn(selected);
+  $("list").innerHTML=evs.length?evs.map(({e,st})=>itemHTML(e,st,selected,timeLabel(e,st,selected))).join("")
+    :`<div class="empty">予定はありません</div>`;
+}
+const REP={daily:"毎日",weekly:"毎週",monthly:"毎月",yearly:"毎年"};
+function itemHTML(e,st,s,t){
+  return `<button type="button" class="item" data-id="${e.id}" data-st="${st}" style="--c:${esc(e.color)}"><span class="bar"></span>
+    <span class="t">${t}</span><span><div class="ti">${esc(e.title)}</div>${REP[e.repeat]?`<div class="rep">↻ ${REP[e.repeat]}</div>`:""}${e.memo?`<div class="memo">${esc(e.memo)}</div>`:""}</span></button>`;
+}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+
+function go(delta){ view.m+=delta; if(view.m<0){view.m=11;view.y--;} if(view.m>11){view.m=0;view.y++;} render(); }
+$("prev").onclick=()=>go(-1); $("next").onclick=()=>go(1);
+$("today").onclick=()=>{const d=new Date();view={y:d.getFullYear(),m:d.getMonth()};selected=ymd(d);render();};
+$("grid").addEventListener("click",ev=>{const b=ev.target.closest(".day");if(!b)return;
+  const s=b.dataset.date; if(s===selected && matchMedia("(min-width:861px)").matches){openEditor(null,s);return;}
+  selected=s; const d=parse(s); if(d.getMonth()!==view.m||d.getFullYear()!==view.y){view={y:d.getFullYear(),m:d.getMonth()};}
+  render();});
+$("list").addEventListener("click",ev=>{const b=ev.target.closest(".item");if(b) openEditor(b.dataset.id,selected,b.dataset.st);});
+$("addBtn").onclick=$("fab").onclick=()=>openEditor(null,selected);
+document.addEventListener("keydown",ev=>{
+  if(ev.key==="Escape"){document.querySelectorAll(".backdrop.open").forEach(x=>x.classList.remove("open"));return;}
+  if(document.querySelector(".backdrop.open")||/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+  if(ev.key==="ArrowLeft") go(-1); else if(ev.key==="ArrowRight") go(1); else if(ev.key==="n") openEditor(null,selected);
+});
+// スワイプで月移動
+(()=>{let x0=null,y0=0;const c=$("cal");
+  c.addEventListener("touchstart",e=>{x0=e.touches[0].clientX;y0=e.touches[0].clientY;},{passive:true});
+  c.addEventListener("touchend",e=>{if(x0===null)return;const dx=e.changedTouches[0].clientX-x0,dy=e.changedTouches[0].clientY-y0;x0=null;
+    if(Math.abs(dx)>50&&Math.abs(dx)>Math.abs(dy)*1.5) go(dx<0?1:-1);},{passive:true});})();
+window.addEventListener("resize",()=>{clearTimeout(window._rt);window._rt=setTimeout(render,120);});
+
+/* ========== 予定の編集 ========== */
+let editing=null, editingSt=null, pickedColor=COLORS[0];
+$("swatches").innerHTML=COLORS.map(c=>`<button type="button" class="sw" style="--c:${c}" data-c="${c}" aria-label="色 ${c}" aria-pressed="false"></button>`).join("");
+$("swatches").onclick=ev=>{const b=ev.target.closest(".sw");if(!b)return;pickedColor=b.dataset.c;paintSw();};
+function paintSw(){document.querySelectorAll(".sw").forEach(b=>b.setAttribute("aria-pressed",b.dataset.c===pickedColor));}
+function syncAllDay(){document.querySelectorAll(".timef").forEach(f=>f.style.display=$("fAllDay").checked?"none":"");}
+function syncRepeat(){$("untilField").style.visibility=$("fRepeat").value==="none"?"hidden":"visible";}
+$("fAllDay").onchange=syncAllDay; $("fRepeat").onchange=syncRepeat;
+$("fDate").onchange=()=>{ if(!$("fEndDate").value||$("fEndDate").value<$("fDate").value) $("fEndDate").value=$("fDate").value; };
+$("fStart").onchange=()=>{ const s=$("fStart").value; if(!s) return; if(!$("fEnd").value||($("fEndDate").value===$("fDate").value&&$("fEnd").value<=s)){
+  const [h,m]=s.split(":").map(Number); $("fEnd").value=pad(Math.min(h+1,23))+":"+pad(m);} };
+
+function openEditor(id,date,st){
+  const e=id?store.events[id]:null; editing=e; editingSt=st||null;
+  $("evDlgTitle").textContent=e?"予定を編集":"予定を追加";
+  $("fTitle").value=e?e.title:"";
+  $("fAllDay").checked=e?!!e.allDay:false;
+  $("fDate").value=e?e.date:date; $("fEndDate").value=e?(e.endDate||e.date):date;
+  let defStart="10:00"; if(!e && date===today){const n=new Date();defStart=pad(Math.min(n.getHours()+1,23))+":00";}
+  $("fStart").value=e?(e.start||""):defStart;
+  $("fEnd").value=e?(e.end||""):pad(Math.min(+defStart.slice(0,2)+1,23))+":00";
+  $("fRepeat").value=e?(e.repeat||"none"):"none"; $("fUntil").value=e?(e.until||""):"";
+  $("fMemo").value=e?(e.memo||""):"";
+  pickedColor=e?e.color:COLORS[0]; paintSw(); syncAllDay(); syncRepeat();
+  $("delBtn").style.display=e?"":"none";
+  $("delOneBtn").style.display=e&&e.repeat&&e.repeat!=="none"?"":"none";
+  $("delBtn").textContent=e&&e.repeat&&e.repeat!=="none"?"すべて削除":"削除";
+  $("evDlg").classList.add("open");
+  setTimeout(()=>{ if(!e) $("fTitle").focus(); },50);
+}
+$("cancelBtn").onclick=()=>$("evDlg").classList.remove("open");
+$("evForm").onsubmit=ev=>{
+  ev.preventDefault();
+  const title=$("fTitle").value.trim(); if(!title){$("fTitle").focus();return;}
+  let date=$("fDate").value, endDate=$("fEndDate").value||date;
+  if(endDate<date) endDate=date;
+  const allDay=$("fAllDay").checked;
+  let start=allDay?"":$("fStart").value, end=allDay?"":$("fEnd").value;
+  if(!allDay && endDate===date && start && end && end<start){ toast("終了時刻が開始より前になっています"); return; }
+  const repeat=$("fRepeat").value, until=repeat==="none"?"":$("fUntil").value;
+  const base=editing?{...editing}:{id:uid(),exdates:[]};
+  const e={...base,title,date,endDate,allDay,start,end,repeat,until,color:pickedColor,memo:$("fMemo").value,updatedAt:Date.now(),deleted:false};
+  store.events[e.id]=e; changed();
+  $("evDlg").classList.remove("open");
+  selected=date; const d=parse(date); view={y:d.getFullYear(),m:d.getMonth()}; render();
+  toast("保存しました");
+};
+$("delBtn").onclick=()=>{ if(!editing) return; if(!confirmTwice($("delBtn"))) return;
+  store.events[editing.id]={id:editing.id,deleted:true,updatedAt:Date.now()}; changed(); $("evDlg").classList.remove("open"); render(); toast("削除しました"); };
+$("delOneBtn").onclick=()=>{ if(!editing) return; const st=editingSt||selected;
+  const e={...editing,exdates:[...(editing.exdates||[]),st],updatedAt:Date.now()};
+  store.events[e.id]=e; changed(); $("evDlg").classList.remove("open"); render(); toast("この日の分を削除しました"); };
+function confirmTwice(btn){ // ブラウザの確認ダイアログを使わず、2回押しで確定
+  if(btn.dataset.armed){delete btn.dataset.armed;btn.textContent=btn._t;return true;}
+  btn._t=btn.textContent; btn.dataset.armed="1"; btn.textContent="もう一度押すと削除";
+  setTimeout(()=>{if(btn.dataset.armed){delete btn.dataset.armed;btn.textContent=btn._t;}},3000); return false;
+}
+document.querySelectorAll(".backdrop").forEach(bd=>bd.addEventListener("click",ev=>{
+  if(ev.target===bd||ev.target.closest("[data-close]")) bd.classList.remove("open");}));
+
+/* ========== 検索 ========== */
+$("searchBtn").onclick=()=>{$("searchDlg").classList.add("open");$("q").value="";doSearch();setTimeout(()=>$("q").focus(),50);};
+$("q").oninput=doSearch;
+function doSearch(){
+  const q=$("q").value.trim().toLowerCase();
+  if(!q){$("results").innerHTML=`<div class="empty">言葉を入れると、タイトルとメモから探します</div>`;return;}
+  const hits=live().filter(e=>(e.title+" "+(e.memo||"")).toLowerCase().includes(q)).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,100);
+  $("results").innerHTML=hits.length?hits.map(e=>{const d=parse(e.date);
+    return itemHTML(e,e.date,e.date,`${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}(${WD[d.getDay()]})`);}).join(""):`<div class="empty">見つかりませんでした</div>`;
+}
+$("results").addEventListener("click",ev=>{const b=ev.target.closest(".item");if(!b)return;const e=store.events[b.dataset.id];
+  selected=e.date;const d=parse(e.date);view={y:d.getFullYear(),m:d.getMonth()};$("searchDlg").classList.remove("open");render();});
+
+/* ========== 設定 ========== */
+$("settingsBtn").onclick=$("syncPill").onclick=()=>{
+  $("token").value=store.sync.token?"••••••••(保存済み)":"";
+  $("weekStart").value=String(store.settings.weekStart||0); $("theme").value=store.settings.theme||"";
+  paintStatus(); $("setDlg").classList.add("open");
+};
+$("token").onfocus=()=>{ if($("token").value.startsWith("••")) $("token").value=""; };
+$("weekStart").onchange=()=>{store.settings.weekStart=+$("weekStart").value;save();render();};
+$("theme").onchange=()=>{store.settings.theme=$("theme").value;save();applyTheme();};
+$("linkBtn").onclick=async()=>{
+  const v=$("token").value.trim();
+  if(v && !v.startsWith("••")){ store.sync.token=v; store.sync.gistId=""; }
+  if(!store.sync.token){toast("トークンを入れてください");return;}
+  store.sync.dirty=true; save(); await sync(true); paintStatus();
+};
+$("unlinkBtn").onclick=()=>{ if(!confirmTwice($("unlinkBtn"))) return; store.sync={token:"",gistId:"",last:0,dirty:false}; save(); paintStatus(); paintPill(); toast("同期をやめました（予定はこの端末に残っています）"); };
+$("exportBtn").onclick=()=>{
+  const blob=new Blob([JSON.stringify({app:"mycal",exportedAt:new Date().toISOString(),events:store.events},null,1)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="calendar-backup-"+today+".json"; document.body.appendChild(a); a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);
+};
+$("importFile").onchange=async()=>{
+  const f=$("importFile").files[0]; if(!f) return;
+  try{const d=JSON.parse(await f.text()); if(!d.events) throw 0; const n=mergeInto(store.events,d.events); changed(); render(); toast(n+"件を読み込みました");}
+  catch(e){toast("読み込めませんでした。書き出したファイルを選んでください");}
+  $("importFile").value="";
+};
+
+/* ========== 同期（GitHub Gist） ========== */
+const FILE="mycal-data.json", API="https://api.github.com";
+let syncState="local", syncMsg="", syncing=false, syncTimer=null;
+function mergeInto(target,src){ let n=0;
+  for(const [id,e] of Object.entries(src||{})){ if(!e||typeof e!=="object"||!e.id) continue;
+    const cur=target[id]; if(!cur||(e.updatedAt||0)>(cur.updatedAt||0)){target[id]=e;n++;} }
+  return n; }
+function changed(){ store.sync.dirty=true; save(); scheduleSync(1500); }
+function scheduleSync(ms){ clearTimeout(syncTimer); syncTimer=setTimeout(()=>sync(false),ms); }
+async function gh(path,opt={}){
+  const r=await fetch(API+path,{...opt,headers:{"Accept":"application/vnd.github+json","Authorization":"Bearer "+store.sync.token,
+    "X-GitHub-Api-Version":"2022-11-28",...(opt.body?{"Content-Type":"application/json"}:{})},cache:"no-store"});
+  if(r.status===401) throw new Error("トークンが正しくないか、期限切れです");
+  if(r.status===403||r.status===404&&path==="/gists") throw new Error("トークンに gist の権限がありません");
+  if(!r.ok) throw new Error("GitHubとの通信に失敗しました（"+r.status+"）");
+  return r.json();
+}
+async function findGist(){
+  for(let page=1;page<=5;page++){
+    const list=await gh(`/gists?per_page=100&page=${page}`);
+    const g=list.find(x=>x.files&&x.files[FILE]); if(g) return g.id;
+    if(list.length<100) break;
+  }
+  return null;
+}
+async function sync(manual){
+  if(!store.sync.token){ syncState="local"; paintPill(); return; }
+  if(!navigator.onLine){ syncState="pending"; syncMsg="オフライン"; paintPill(); return; }
+  if(syncing){ scheduleSync(2000); return; }
+  syncing=true; paintPill(true);
+  try{
+    if(!store.sync.gistId) store.sync.gistId=await findGist()||"";
+    let remote={events:{}};
+    if(store.sync.gistId){
+      const g=await gh("/gists/"+store.sync.gistId);
+      const f=g.files&&g.files[FILE];
+      if(f){ let txt=f.content; if(f.truncated) txt=await (await fetch(f.raw_url,{cache:"no-store"})).text();
+        try{remote=JSON.parse(txt);}catch(e){remote={events:{}};} }
+    }
+    const before=JSON.stringify(store.events);
+    mergeInto(store.events,remote.events);
+    const merged={...store.events};
+    const needPush=hasNewer(merged,remote.events||{});
+    const body=JSON.stringify({app:"mycal",version:1,updatedAt:new Date().toISOString(),events:merged});
+    if(!store.sync.gistId){
+      const g=await gh("/gists",{method:"POST",body:JSON.stringify({description:"マイカレンダーの同期データ（消さないでください）",public:false,files:{[FILE]:{content:body}}})});
+      store.sync.gistId=g.id;
+    }else if(needPush){
+      await gh("/gists/"+store.sync.gistId,{method:"PATCH",body:JSON.stringify({files:{[FILE]:{content:body}}})});
+    }
+    store.sync.dirty=false; store.sync.last=Date.now(); save();
+    syncState="ok"; syncMsg="";
+    if(JSON.stringify(store.events)!==before) render();
+    if(manual) toast("同期しました");
+  }catch(e){
+    syncState=navigator.onLine?"err":"pending"; syncMsg=navigator.onLine?(e.message||"同期できませんでした"):"オフライン";
+    if(manual) toast(syncMsg);
+  }finally{ syncing=false; paintPill(); paintStatus(); }
+}
+function hasNewer(local,remote){ for(const [id,e] of Object.entries(local)){ const r=remote[id]; if(!r||(e.updatedAt||0)>(r.updatedAt||0)) return true; } return false; }
+function fmtTime(t){const d=new Date(t);return (ymd(d)===today?"":(d.getMonth()+1)+"/"+d.getDate()+" ")+pad(d.getHours())+":"+pad(d.getMinutes());}
+function paintPill(busy){
+  const p=$("syncPill"), t=$("syncText"); p.className="sync-pill";
+  if(busy){p.classList.add("busy","ok");t.textContent="同期中…";return;}
+  if(!store.sync.token){t.textContent="端末に保存";return;}
+  if(syncState==="ok"){p.classList.add("ok");t.textContent="同期済み "+fmtTime(store.sync.last);}
+  else if(syncState==="pending"){p.classList.add("pending");t.textContent=store.sync.dirty?"オフライン・未送信あり":"オフライン";}
+  else if(syncState==="err"){p.classList.add("err");t.textContent="同期エラー";}
+  else {t.textContent=store.sync.dirty?"未送信あり":"同期待ち";}
+}
+function paintStatus(){
+  const n=live().length; let s=`予定 ${n}件（この端末に保存）<br>`;
+  if(!store.sync.token) s+="同期：未設定。トークンを入れるとPCとスマホで同期します。";
+  else s+=`同期：${syncState==="ok"?"OK":syncState==="err"?"エラー – "+esc(syncMsg):syncState==="pending"?"オフライン（つながったら送ります）":"待機中"}`+
+    (store.sync.last?`<br>最後に同期：${fmtTime(store.sync.last)}`:"");
+  $("syncStatus").innerHTML=s;
+}
+window.addEventListener("online",()=>sync(false));
+window.addEventListener("offline",()=>{syncState="pending";paintPill();});
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"){ if(ymd(new Date())!==today) render(); sync(false);} });
+setInterval(()=>{ if(document.visibilityState==="visible") sync(false); },5*60*1000);
+
+let toastT; function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2200);}
+
+/* ========== 起動 ========== */
+applyTheme(); render(); paintPill(); sync(false);
+if("serviceWorker" in navigator && location.protocol==="https:") navigator.serviceWorker.register("sw.js").catch(()=>{});
+</script>
+</body>
+</html>
