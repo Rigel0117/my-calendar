@@ -18,13 +18,21 @@ public class EventDialog : BaseDialog
     readonly TextBox title, memo;
     readonly CheckBox allDay;
     readonly DatePicker dStart, dEnd, dUntil;
-    readonly ComboBox tStart, tEnd, repeat;
+    readonly ComboBox tStart, tEnd, repeat, remind;
+    readonly TextBox remindCustom;
+    readonly StackPanel remindCustomField;
+    readonly TextBlock remindNote;
     readonly Grid timeGrid1, timeGrid2;
     readonly StackPanel untilField;
     readonly WrapPanel swatches = new();
     string color;
 
     static readonly string[] Times = Enumerable.Range(0, 96).Select(i => $"{i / 4:00}:{i % 4 * 15:00}").ToArray();
+    static readonly (int? value, string label)[] Reminds =
+    {
+        (null, "なし"), (0, "開始時刻ちょうど"), (5, "5分前"), (10, "10分前"), (15, "15分前"), (30, "30分前"),
+        (60, "1時間前"), (120, "2時間前"), (1440, "1日前"), (2880, "2日前"), (10080, "1週間前"), (-1, "時間を指定…"),
+    };
     static readonly (string value, string label)[] Repeats =
         { ("none", "なし"), ("daily", "毎日"), ("weekly", "毎週"), ("monthly", "毎月（同じ日）"), ("yearly", "毎年") };
 
@@ -68,6 +76,25 @@ public class EventDialog : BaseDialog
         untilField = UI.Field(P, "繰り返しの終了日（任意）", dUntil);
         root.Children.Add(Row(UI.Field(P, "繰り返し", repeat), untilField));
 
+        // 通知
+        remind = UI.Styled(P, new ComboBox());
+        foreach (var (v, l) in Reminds) remind.Items.Add(new ComboBoxItem { Content = l, Tag = v });
+        remindCustom = UI.Styled(P, new TextBox { MaxLength = 5 });
+        remindCustomField = UI.Field(P, "何分前に通知するか", remindCustom);
+        int idx = 0;
+        if (e?.Remind is int rm && rm >= 0)
+        {
+            idx = Array.FindIndex(Reminds, r => r.value == rm);
+            if (idx < 0) { idx = Reminds.Length - 1; remindCustom.Text = rm.ToString(); }
+        }
+        remind.SelectedIndex = idx;
+        root.Children.Add(Row(UI.Field(P, "通知", remind, 4), remindCustomField));
+        remindNote = new TextBlock
+        {
+            Text = "終日の予定は、その日の 9:00 を基準に通知します。", Foreground = P.Muted, FontSize = 12, Margin = new Thickness(0, 0, 0, 10),
+        };
+        root.Children.Add(remindNote);
+
         // 色
         BuildSwatches();
         root.Children.Add(UI.Field(P, "色", swatches));
@@ -105,6 +132,7 @@ public class EventDialog : BaseDialog
         allDay.Checked += (_, _) => SyncVisibility();
         allDay.Unchecked += (_, _) => SyncVisibility();
         repeat.SelectionChanged += (_, _) => SyncVisibility();
+        remind.SelectionChanged += (_, _) => { SyncVisibility(); if (Reminds[Math.Max(remind.SelectedIndex, 0)].value == -1) remindCustom.Focus(); };
         dStart.SelectedDateChanged += (_, _) =>
         {
             if (dStart.SelectedDate is DateTime s && (dEnd.SelectedDate == null || dEnd.SelectedDate < s)) dEnd.SelectedDate = s;
@@ -164,6 +192,9 @@ public class EventDialog : BaseDialog
         ((FrameworkElement)timeGrid1.Children[1]).Visibility = ad ? Visibility.Hidden : Visibility.Visible;
         ((FrameworkElement)timeGrid2.Children[1]).Visibility = ad ? Visibility.Hidden : Visibility.Visible;
         untilField.Visibility = SelectedRepeat() == "none" ? Visibility.Hidden : Visibility.Visible;
+        var rv = Reminds[Math.Max(remind.SelectedIndex, 0)].value;
+        remindCustomField.Visibility = rv == -1 ? Visibility.Visible : Visibility.Hidden;
+        remindNote.Visibility = ad && rv != null ? Visibility.Visible : Visibility.Collapsed;
     }
 
     string SelectedRepeat() => (repeat.SelectedItem as ComboBoxItem)?.Tag as string ?? "none";
@@ -207,11 +238,17 @@ public class EventDialog : BaseDialog
         if (ts == null || te == null) { Warn("時刻は 9:30 や 14:00 のように入れてください"); return; }
         if (!ad && start == end && ts != "" && te != "" && string.CompareOrdinal(te, ts) < 0) { Warn("終了時刻が開始時刻より前になっています"); return; }
         var rep = SelectedRepeat();
+        int? rem = Reminds[Math.Max(remind.SelectedIndex, 0)].value;
+        if (rem == -1)
+        {
+            if (!int.TryParse(remindCustom.Text.Trim(), out var n) || n < 0 || n > 43200) { Warn("通知は 0〜43200 分前の間で、数字で入れてください"); remindCustom.Focus(); return; }
+            rem = n;
+        }
         var until = rep != "none" && dUntil.SelectedDate is DateTime du ? Dates.F(DateOnly.FromDateTime(du)) : "";
 
         var ev = existing?.Clone() ?? new CalEvent { Id = NewId(), Exdates = new List<string>() };
         ev.Title = t; ev.Date = Dates.F(start); ev.EndDate = Dates.F(end); ev.AllDay = ad;
-        ev.Start = ts; ev.End = te; ev.Repeat = rep; ev.Until = until; ev.Color = color; ev.Memo = memo.Text;
+        ev.Start = ts; ev.End = te; ev.Repeat = rep; ev.Until = until; ev.Color = color; ev.Memo = memo.Text; ev.Remind = rem;
         ev.Deleted = false; ev.UpdatedAt = Store.Now();
         Result = ev; JumpToDate = true;
         Close();
@@ -341,6 +378,19 @@ public class SettingsDialog : BaseDialog
         var f1 = UI.Field(P, "週のはじまり", week); var f2 = UI.Field(P, "表示テーマ", theme);
         Grid.SetColumn(f2, 2); g.Children.Add(f1); g.Children.Add(f2);
         root.Children.Add(g);
+
+        // 通知とタスクトレイ
+        var toTray = new CheckBox { Content = "×で閉じてもタスクトレイで動かす（通知を受け取るため）", IsChecked = main.Store.Settings.CloseToTray, Foreground = P.Ink, Margin = new Thickness(0, 4, 0, 8) };
+        toTray.Click += (_, _) => { main.Store.Settings.CloseToTray = toTray.IsChecked == true; main.TrySave(); };
+        var auto = new CheckBox { Content = "Windowsの起動時に自動で開く（タスクトレイに入った状態で）", IsChecked = Tray.AutoStart, Foreground = P.Ink, Margin = new Thickness(0, 0, 0, 8) };
+        auto.Click += (_, _) => Tray.AutoStart = auto.IsChecked == true;
+        root.Children.Add(UI.Label(P, "通知"));
+        root.Children.Add(toTray);
+        root.Children.Add(auto);
+        var test = UI.Btn(P, "通知のテスト", () => main.Tray.Notify("🔔 テスト", "予定の通知はこのように届きます。", main.ShowFromTray));
+        test.HorizontalAlignment = HorizontalAlignment.Left;
+        root.Children.Add(test);
+        root.Children.Add(Sep());
 
         // バックアップ
         root.Children.Add(UI.Label(P, "バックアップ"));

@@ -32,6 +32,9 @@ public class MainWindow : Window
     DateTime lastActivatedSync = DateTime.MinValue;
     readonly DispatcherTimer debounce = new() { Interval = TimeSpan.FromSeconds(1.5) };
     readonly DispatcherTimer minute = new() { Interval = TimeSpan.FromMinutes(1) };
+    readonly DispatcherTimer remindTimer = new() { Interval = TimeSpan.FromSeconds(20) };
+    public readonly Tray Tray = new();
+    bool exiting;
     int minuteCount;
 
     public MainWindow(Store store)
@@ -60,13 +63,33 @@ public class MainWindow : Window
         BuildUI();
 
         SourceInitialized += (_, _) => UI.TitleBar(this, P.Dark);
-        Loaded += async (_, _) => await DoSync(false);
+        // 表示していない（タスクトレイで起動した）ときも同期と通知が動くように
+        Dispatcher.InvokeAsync(async () => { CheckReminders(); await DoSync(false); }, DispatcherPriority.ApplicationIdle);
         Activated += async (_, _) =>
         {
             if (Dates.Today != today) Render();
             if ((DateTime.Now - lastActivatedSync).TotalSeconds > 30) { lastActivatedSync = DateTime.Now; await DoSync(false); }
         };
-        Closing += (_, _) => SaveBounds();
+        Closing += (_, e) =>
+        {
+            SaveBounds();
+            if (exiting || !Store.Settings.CloseToTray) return;
+            // ×で閉じてもタスクトレイで動き続ける（通知を出すため）
+            e.Cancel = true;
+            Hide();
+            if (!Store.Settings.TrayHintShown)
+            {
+                Tray.Notify("マイカレンダー", "タスクトレイで動いています。予定の通知はここから届きます。終了するときはアイコンを右クリック →「終了」。", ShowFromTray);
+                Store.Settings.TrayHintShown = true;
+                TrySave();
+            }
+        };
+        Closed += (_, _) => Tray.Dispose();
+        Tray.OpenRequested += ShowFromTray;
+        Tray.ExitRequested += ExitApp;
+        remindTimer.Tick += (_, _) => CheckReminders();
+        remindTimer.Start();
+        if (Tray.AutoStart) Tray.AutoStart = true; // exeを移動していても新しい場所で登録し直す
         PreviewKeyDown += OnKey;
 
         debounce.Tick += async (_, _) => { debounce.Stop(); await DoSync(false); };
@@ -81,6 +104,44 @@ public class MainWindow : Window
             if (e.IsAvailable) await DoSync(false);
             else { SyncStateNow = Store.GetToken() == "" ? SyncState.Local : SyncState.Pending; SyncMessage = "オフライン"; PaintSync(); }
         });
+    }
+
+    public void ShowFromTray()
+    {
+        if (!IsVisible) Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+        Topmost = true; Topmost = false; // 前面に出す
+        Focus();
+    }
+
+    public void ExitApp()
+    {
+        exiting = true;
+        Close();
+    }
+
+    /// <summary>通知の時刻になった予定を、Windowsの通知で知らせる</summary>
+    public void CheckReminders()
+    {
+        var now = DateTime.Now;
+        bool changed = false;
+        foreach (var (e, occ, fire) in Dates.DueReminders(Store, now, TimeSpan.FromMinutes(15)))
+        {
+            var key = $"{e.Id}|{Dates.F(occ)}|{e.Remind}|{e.Start}";
+            if (Store.Notified.ContainsKey(key)) continue;
+            Store.Notified[key] = new DateTimeOffset(fire).ToUnixTimeMilliseconds();
+            changed = true;
+            var d = occ;
+            Tray.Notify("🔔 " + (e.Title ?? ""), Dates.ReminderText(e, occ), () => { ShowFromTray(); JumpTo(d); });
+        }
+        // 3日より前の記録は消す
+        var cutoff = DateTimeOffset.Now.AddDays(-3).ToUnixTimeMilliseconds();
+        foreach (var k in Store.Notified.Where(kv => kv.Value < cutoff).Select(kv => kv.Key).ToList())
+        {
+            Store.Notified.Remove(k); changed = true;
+        }
+        if (changed) TrySave();
     }
 
     static bool OnScreen(double left, double top) =>
@@ -383,7 +444,8 @@ public class MainWindow : Window
         var body = new StackPanel();
         body.Children.Add(new TextBlock { Text = e.Title ?? "", FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
         var rep = Dates.RepeatLabel(e.Repeat);
-        if (rep != "") body.Children.Add(new TextBlock { Text = "↻ " + rep, FontSize = 11.5, Foreground = P.Muted });
+        var info = (rep != "" ? "↻ " + rep + "　" : "") + (e.Remind is int rm && rm >= 0 ? "通知：" + Dates.RemindLabel(rm) : "");
+        if (info != "") body.Children.Add(new TextBlock { Text = info.Trim(), FontSize = 11.5, Foreground = P.Muted });
         if (!string.IsNullOrWhiteSpace(e.Memo)) body.Children.Add(new TextBlock { Text = e.Memo, FontSize = 12.5, Foreground = P.Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
         Grid.SetColumn(body, 2); g.Children.Add(body);
 

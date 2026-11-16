@@ -228,6 +228,12 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0}
         <select id="fRepeat"><option value="none">なし</option><option value="daily">毎日</option><option value="weekly">毎週</option><option value="monthly">毎月（同じ日）</option><option value="yearly">毎年</option></select></div>
       <div class="field" id="untilField"><label for="fUntil">繰り返しの終了日（任意）</label><input type="date" id="fUntil"></div>
     </div>
+    <div class="row">
+      <div class="field"><label for="fRemind">通知</label>
+        <select id="fRemind"><option value="none">なし</option><option value="0">開始時刻ちょうど</option><option value="5">5分前</option><option value="10">10分前</option><option value="15">15分前</option><option value="30">30分前</option><option value="60">1時間前</option><option value="120">2時間前</option><option value="1440">1日前</option><option value="2880">2日前</option><option value="10080">1週間前</option><option value="custom">時間を指定…</option></select></div>
+      <div class="field" id="remindCustomField"><label for="fRemindCustom">何分前に通知するか</label><input type="number" id="fRemindCustom" min="0" max="43200" step="1" inputmode="numeric" placeholder="例：45"></div>
+    </div>
+    <p class="note" id="remindNote">終日の予定は、その日の 9:00 を基準に通知します。通知は Discord と Windows版のアプリに届きます。</p>
     <div class="field"><span class="lbl">色</span><div class="swatches" id="swatches"></div></div>
     <div class="field"><label for="fMemo">メモ</label><textarea id="fMemo" maxlength="5000" placeholder="場所や持ち物など"></textarea></div>
     <div class="actions">
@@ -471,7 +477,7 @@ function renderSide(){
 const REP={daily:"毎日",weekly:"毎週",monthly:"毎月",yearly:"毎年"};
 function itemHTML(e,st,s,t){
   return `<button type="button" class="item" data-id="${e.id}" data-st="${st}" style="--c:${esc(e.color)}"><span class="bar"></span>
-    <span class="t">${t}</span><span><div class="ti">${esc(e.title)}</div>${REP[e.repeat]?`<div class="rep">↻ ${REP[e.repeat]}</div>`:""}${e.memo?`<div class="memo">${esc(e.memo)}</div>`:""}</span></button>`;
+    <span class="t">${t}</span><span><div class="ti">${esc(e.title)}</div>${REP[e.repeat]||hasRemind(e)?`<div class="rep">${REP[e.repeat]?`↻ ${REP[e.repeat]}　`:""}${hasRemind(e)?`通知：${remindLabel(+e.remind)}`:""}</div>`:""}${e.memo?`<div class="memo">${esc(e.memo)}</div>`:""}</span></button>`;
 }
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 
@@ -504,8 +510,24 @@ $("swatches").innerHTML=COLORS.map(c=>`<button type="button" class="sw" style="-
 $("swatches").onclick=ev=>{const b=ev.target.closest(".sw");if(!b)return;pickedColor=b.dataset.c;paintSw();};
 function paintSw(){document.querySelectorAll(".sw").forEach(b=>b.setAttribute("aria-pressed",b.dataset.c===pickedColor));}
 function syncAllDay(){document.querySelectorAll(".timef").forEach(f=>f.style.display=$("fAllDay").checked?"none":"");}
+const REMIND_PRESETS=["0","5","10","15","30","60","120","1440","2880","10080"];
+const hasRemind=e=>e.remind!==null&&e.remind!==undefined&&e.remind!==""&&+e.remind>=0;
+function remindLabel(m){
+  if(m===0) return "開始時刻";
+  if(m%10080===0) return (m/10080)+"週間前";
+  if(m%1440===0) return (m/1440)+"日前";
+  if(m%60===0) return (m/60)+"時間前";
+  if(m>60) return Math.floor(m/60)+"時間"+(m%60)+"分前";
+  return m+"分前";
+}
+function syncRemind(){
+  const v=$("fRemind").value;
+  $("remindCustomField").style.visibility=v==="custom"?"visible":"hidden";
+  $("remindNote").style.display=v!=="none"&&$("fAllDay").checked?"":"none";
+}
+$("fRemind").onchange=()=>{syncRemind(); if($("fRemind").value==="custom") $("fRemindCustom").focus();};
 function syncRepeat(){$("untilField").style.visibility=$("fRepeat").value==="none"?"hidden":"visible";}
-$("fAllDay").onchange=syncAllDay; $("fRepeat").onchange=syncRepeat;
+$("fAllDay").onchange=()=>{syncAllDay();syncRemind();}; $("fRepeat").onchange=syncRepeat;
 $("fDate").onchange=()=>{ if(!$("fEndDate").value||$("fEndDate").value<$("fDate").value) $("fEndDate").value=$("fDate").value; };
 $("fStart").onchange=()=>{ const s=$("fStart").value; if(!s) return; if(!$("fEnd").value||($("fEndDate").value===$("fDate").value&&$("fEnd").value<=s)){
   const [h,m]=s.split(":").map(Number); $("fEnd").value=pad(Math.min(h+1,23))+":"+pad(m);} };
@@ -520,8 +542,10 @@ function openEditor(id,date,st){
   $("fStart").value=e?(e.start||""):defStart;
   $("fEnd").value=e?(e.end||""):pad(Math.min(+defStart.slice(0,2)+1,23))+":00";
   $("fRepeat").value=e?(e.repeat||"none"):"none"; $("fUntil").value=e?(e.until||""):"";
+  if(e&&hasRemind(e)){ const r=String(+e.remind); if(REMIND_PRESETS.includes(r)){$("fRemind").value=r;$("fRemindCustom").value="";} else {$("fRemind").value="custom";$("fRemindCustom").value=r;} }
+  else { $("fRemind").value="none"; $("fRemindCustom").value=""; }
   $("fMemo").value=e?(e.memo||""):"";
-  pickedColor=e?e.color:COLORS[0]; paintSw(); syncAllDay(); syncRepeat();
+  pickedColor=e?e.color:COLORS[0]; paintSw(); syncAllDay(); syncRepeat(); syncRemind();
   $("delBtn").style.display=e?"":"none";
   $("delOneBtn").style.display=e&&e.repeat&&e.repeat!=="none"?"":"none";
   $("delBtn").textContent=e&&e.repeat&&e.repeat!=="none"?"すべて削除":"削除";
@@ -538,8 +562,11 @@ $("evForm").onsubmit=ev=>{
   let start=allDay?"":$("fStart").value, end=allDay?"":$("fEnd").value;
   if(!allDay && endDate===date && start && end && end<start){ toast("終了時刻が開始より前になっています"); return; }
   const repeat=$("fRepeat").value, until=repeat==="none"?"":$("fUntil").value;
+  let remind=null; const rv=$("fRemind").value;
+  if(rv==="custom"){ const n=parseInt($("fRemindCustom").value,10); if(!(n>=0&&n<=43200)){ toast("通知は 0〜43200 分前の間で入れてください"); $("fRemindCustom").focus(); return; } remind=n; }
+  else if(rv!=="none") remind=+rv;
   const base=editing?{...editing}:{id:uid(),exdates:[]};
-  const e={...base,title,date,endDate,allDay,start,end,repeat,until,color:pickedColor,memo:$("fMemo").value,updatedAt:Date.now(),deleted:false};
+  const e={...base,title,date,endDate,allDay,start,end,repeat,until,remind,color:pickedColor,memo:$("fMemo").value,updatedAt:Date.now(),deleted:false};
   store.events[e.id]=e; changed();
   $("evDlg").classList.remove("open");
   selected=date; const d=parse(date); view={y:d.getFullYear(),m:d.getMonth()}; render();

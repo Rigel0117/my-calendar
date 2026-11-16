@@ -6,16 +6,28 @@ namespace MyCalendar;
 
 public static class Program
 {
+    const string ShowEventName = "MyCalendar.Show.v1";
+
     [STAThread]
-    public static void Main()
+    public static void Main(string[] args)
     {
-        // 同じアプリを2つ開いて予定が食い違わないようにする
+        // 同じアプリを2つ開いて予定が食い違わないようにする。
+        // 2つ目を開こうとしたときは、すでに開いている方を前に出す。
         using var mutex = new Mutex(true, "MyCalendar.SingleInstance.v1", out bool first);
         if (!first)
         {
-            MessageBox.Show("マイカレンダーはすでに開いています。タスクバーを確認してください。", "マイカレンダー");
+            try
+            {
+                using var ev = EventWaitHandle.OpenExisting(ShowEventName);
+                ev.Set();
+            }
+            catch
+            {
+                MessageBox.Show("マイカレンダーはすでに開いています。タスクトレイを確認してください。", "マイカレンダー");
+            }
             return;
         }
+        using var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
 
         // 日付や漢字の表示を日本語にする
         var ja = CultureInfo.GetCultureInfo("ja-JP");
@@ -40,6 +52,24 @@ public static class Program
         };
 
         var store = Storage.Load();
-        app.Run(new MainWindow(store));
+        var main = new MainWindow(store);
+        app.MainWindow = main;
+
+        var waiter = new Thread(() =>
+        {
+            try
+            {
+                while (showEvent.WaitOne())
+                    app.Dispatcher.Invoke(() => main.ShowFromTray());
+            }
+            catch { }
+        })
+        { IsBackground = true };
+        waiter.Start();
+
+        // Windows起動時の自動起動（--tray）のときは、タスクトレイに入った状態で始める
+        bool startHidden = args.Any(a => a == "--tray") && store.Settings.CloseToTray;
+        if (!startHidden) main.Show();
+        app.Run();
     }
 }

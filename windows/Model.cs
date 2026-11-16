@@ -21,6 +21,8 @@ public class CalEvent
     [JsonPropertyName("exdates")] public List<string>? Exdates { get; set; }
     [JsonPropertyName("color")] public string? Color { get; set; }
     [JsonPropertyName("memo")] public string? Memo { get; set; }
+    /// <summary>何分前に通知するか（null＝通知しない）</summary>
+    [JsonPropertyName("remind")] public int? Remind { get; set; }
     [JsonPropertyName("updatedAt")] public double UpdatedAt { get; set; }
     [JsonPropertyName("deleted")] public bool Deleted { get; set; }
 
@@ -41,6 +43,8 @@ public class AppSettings
     public double WinWidth { get; set; } = 1180;
     public double WinHeight { get; set; } = 760;
     public bool Maximized { get; set; }
+    public bool CloseToTray { get; set; } = true;     // 閉じてもタスクトレイで動かす
+    public bool TrayHintShown { get; set; }
 }
 
 public class SyncInfo
@@ -56,6 +60,8 @@ public class Store
     public Dictionary<string, CalEvent> Events { get; set; } = new();
     public AppSettings Settings { get; set; } = new();
     public SyncInfo Sync { get; set; } = new();
+    /// <summary>このPCで通知済みのもの（キー → 通知予定時刻）</summary>
+    public Dictionary<string, double> Notified { get; set; } = new();
 
     public IEnumerable<CalEvent> Live => Events.Values.Where(e => !e.Deleted && Dates.TryParse(e.Date, out _));
 
@@ -125,6 +131,7 @@ public static class Storage
                     s.Events ??= new();
                     s.Settings ??= new();
                     s.Sync ??= new();
+                    s.Notified ??= new();
                     return s;
                 }
             }
@@ -347,6 +354,48 @@ public static class Dates
         if (s == st) return (e.Start ?? "") + "〜";
         if (s == en) return "〜" + (e.End ?? "");
         return "終日";
+    }
+
+    // ---- 通知 ----
+    public static string RemindLabel(int m)
+    {
+        if (m == 0) return "開始時刻";
+        if (m % 10080 == 0) return $"{m / 10080}週間前";
+        if (m % 1440 == 0) return $"{m / 1440}日前";
+        if (m % 60 == 0) return $"{m / 60}時間前";
+        if (m > 60) return $"{m / 60}時間{m % 60}分前";
+        return $"{m}分前";
+    }
+
+    /// <summary>終日の予定はその日の9:00を基準に通知する（Discord通知と同じ）</summary>
+    public static readonly TimeOnly AllDayBase = new(9, 0);
+
+    /// <summary>今、通知すべきもの（通知時刻を過ぎてから window 以内）</summary>
+    public static IEnumerable<(CalEvent e, DateOnly occ, DateTime fire)> DueReminders(Store store, DateTime now, TimeSpan window)
+    {
+        var today = DateOnly.FromDateTime(now);
+        foreach (var e in store.Live.ToList())
+        {
+            if (e.Remind is not int m || m < 0) continue;
+            int ahead = m / 1440 + 2;
+            for (int k = -1; k <= ahead; k++)
+            {
+                var d = today.AddDays(k);
+                if (!IsStart(e, d)) continue;
+                var t = !e.AllDay && TimeOnly.TryParseExact(e.Start ?? "", "HH:mm", Inv, DateTimeStyles.None, out var tt) ? tt : AllDayBase;
+                var fire = d.ToDateTime(t).AddMinutes(-m);
+                if (fire <= now && now - fire < window) yield return (e, d, fire);
+            }
+        }
+    }
+
+    public static string ReminderText(CalEvent e, DateOnly occ)
+    {
+        var s = $"{occ.Month}/{occ.Day}({WD[(int)occ.DayOfWeek]}) " + (e.AllDay ? "終日" : TimeLabel(e, occ, occ));
+        int m = e.Remind ?? 0;
+        s += m == 0 ? "（開始時刻）" : $"（{RemindLabel(m)}のお知らせ）";
+        if (!string.IsNullOrWhiteSpace(e.Memo)) s += "\n" + e.Memo.Trim();
+        return s;
     }
 
     public static string RepeatLabel(string? r) => r switch
