@@ -22,6 +22,12 @@ public class EventDialog : BaseDialog
     readonly TextBox remindCustom;
     readonly StackPanel remindCustomField;
     readonly TextBlock remindNote;
+    // タスク用
+    string kind;
+    readonly CheckBox noDue, done;
+    readonly Button segEvent, segTask;
+    readonly Grid repeatRow, remindRow;
+    readonly TextBlock lblDate, lblTime;
     readonly Grid timeGrid1, timeGrid2;
     readonly StackPanel untilField;
     readonly WrapPanel swatches = new();
@@ -36,15 +42,25 @@ public class EventDialog : BaseDialog
     static readonly (string value, string label)[] Repeats =
         { ("none", "なし"), ("daily", "毎日"), ("weekly", "毎週"), ("monthly", "毎月（同じ日）"), ("yearly", "毎年") };
 
-    public EventDialog(Window owner, Palette p, CalEvent? existing, DateOnly date, DateOnly? occStart)
+    public EventDialog(Window owner, Palette p, CalEvent? existing, DateOnly date, DateOnly? occStart, string newKind = "event", bool noDueDefault = false)
         : base(owner, p, existing == null ? "予定を追加" : "予定を編集", 520)
     {
         this.existing = existing;
         occ = occStart ?? date;
         var e = existing;
         color = e?.Color ?? UI.Colors[0];
+        kind = e != null ? (e.IsTask ? "task" : "event") : newKind;
 
         var root = new StackPanel { Margin = new Thickness(22, 18, 22, 18) };
+
+        // 予定／タスクの切り替え
+        var seg = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
+        segEvent = UI.Btn(P, "予定", () => SetKind("event"));
+        segTask = UI.Btn(P, "タスク", () => SetKind("task"));
+        segEvent.Padding = segTask.Padding = new Thickness(20, 6, 20, 6);
+        segTask.Margin = new Thickness(6, 0, 0, 0);
+        seg.Children.Add(segEvent); seg.Children.Add(segTask);
+        root.Children.Add(seg);
 
         title = UI.Styled(P, new TextBox { Text = e?.Title ?? "", MaxLength = 200 });
         title.FontSize = 17; title.FontWeight = FontWeights.SemiBold;
@@ -52,6 +68,12 @@ public class EventDialog : BaseDialog
 
         allDay = new CheckBox { Content = "終日", IsChecked = e?.AllDay ?? false, Foreground = P.Ink, Margin = new Thickness(0, 0, 0, 12), VerticalContentAlignment = VerticalAlignment.Center };
         root.Children.Add(allDay);
+        noDue = new CheckBox
+        {
+            Content = "期限なし", IsChecked = e != null ? (e.IsTask && string.IsNullOrEmpty(e.Date)) : noDueDefault,
+            Foreground = P.Ink, Margin = new Thickness(0, 0, 0, 12), VerticalContentAlignment = VerticalAlignment.Center,
+        };
+        root.Children.Add(noDue);
 
         // 開始・終了
         var d0 = e != null ? Dates.P(e.Date, date) : date;
@@ -61,9 +83,11 @@ public class EventDialog : BaseDialog
         string defEnd = $"{Math.Min(int.Parse(defStart[..2]) + 1, 23):00}:{defStart[3..]}";
 
         dStart = Picker(d0); dEnd = Picker(d1);
-        tStart = TimeBox(e != null ? e.Start ?? "" : defStart);
+        tStart = TimeBox(e != null ? e.Start ?? "" : kind == "task" ? "" : defStart);
         tEnd = TimeBox(e != null ? e.End ?? "" : defEnd);
-        timeGrid1 = Row(UI.Field(P, "開始日", dStart), UI.Field(P, "開始時刻", tStart));
+        var fDate = UI.Field(P, "開始日", dStart); var fTime = UI.Field(P, "開始時刻", tStart);
+        lblDate = (TextBlock)fDate.Children[0]; lblTime = (TextBlock)fTime.Children[0];
+        timeGrid1 = Row(fDate, fTime);
         timeGrid2 = Row(UI.Field(P, "終了日", dEnd), UI.Field(P, "終了時刻", tEnd));
         root.Children.Add(timeGrid1);
         root.Children.Add(timeGrid2);
@@ -74,7 +98,8 @@ public class EventDialog : BaseDialog
         repeat.SelectedIndex = Math.Max(0, Array.FindIndex(Repeats, r => r.value == (e?.Repeat ?? "none")));
         dUntil = Picker(Dates.TryParse(e?.Until, out var u) ? u : (DateOnly?)null);
         untilField = UI.Field(P, "繰り返しの終了日（任意）", dUntil);
-        root.Children.Add(Row(UI.Field(P, "繰り返し", repeat), untilField));
+        repeatRow = Row(UI.Field(P, "繰り返し", repeat), untilField);
+        root.Children.Add(repeatRow);
 
         // 通知
         remind = UI.Styled(P, new ComboBox());
@@ -88,7 +113,8 @@ public class EventDialog : BaseDialog
             if (idx < 0) { idx = Reminds.Length - 1; remindCustom.Text = rm.ToString(); }
         }
         remind.SelectedIndex = idx;
-        root.Children.Add(Row(UI.Field(P, "通知", remind, 4), remindCustomField));
+        remindRow = Row(UI.Field(P, "通知", remind, 4), remindCustomField);
+        root.Children.Add(remindRow);
         remindNote = new TextBlock
         {
             Text = "終日の予定は、その日の 9:00 を基準に通知します。", Foreground = P.Muted, FontSize = 12, Margin = new Thickness(0, 0, 0, 10),
@@ -104,13 +130,15 @@ public class EventDialog : BaseDialog
             Text = e?.Memo ?? "", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 84,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxLength = 5000,
         });
+        done = new CheckBox { Content = "完了", IsChecked = e?.Done ?? false, Foreground = P.Ink, Margin = new Thickness(0, 0, 0, 12), VerticalContentAlignment = VerticalAlignment.Center };
+        root.Children.Add(done);
         root.Children.Add(UI.Field(P, "メモ", memo, 16));
 
         // ボタン
         var buttons = new DockPanel { LastChildFill = false };
         if (e != null)
         {
-            bool rep = !string.IsNullOrEmpty(e.Repeat) && e.Repeat != "none";
+            bool rep = !e.IsTask && !string.IsNullOrEmpty(e.Repeat) && e.Repeat != "none";
             var del = UI.Btn(P, rep ? "すべて削除" : "削除", DeleteAll, UI.Kind.Danger);
             DockPanel.SetDock(del, Dock.Left); buttons.Children.Add(del);
             if (rep)
@@ -129,6 +157,8 @@ public class EventDialog : BaseDialog
 
         Content = root;
 
+        noDue.Checked += (_, _) => SyncVisibility();
+        noDue.Unchecked += (_, _) => SyncVisibility();
         allDay.Checked += (_, _) => SyncVisibility();
         allDay.Unchecked += (_, _) => SyncVisibility();
         repeat.SelectionChanged += (_, _) => SyncVisibility();
@@ -139,8 +169,24 @@ public class EventDialog : BaseDialog
         };
         tStart.LostFocus += (_, _) => AdjustEnd();
         tStart.SelectionChanged += (_, _) => Dispatcher.InvokeAsync(AdjustEnd);
-        SyncVisibility();
+        tStart.LostFocus += (_, _) => SyncVisibility();
+        SetKind(kind);
         Loaded += (_, _) => { if (existing == null) { title.Focus(); } };
+    }
+
+    void SetKind(string k)
+    {
+        kind = k;
+        bool task = k == "task";
+        void Paint(Button b, bool on)
+        {
+            b.Background = on ? P.Ink : P.Sheet; b.Foreground = on ? P.Paper : P.Muted; b.BorderBrush = on ? P.Ink : P.Line;
+        }
+        Paint(segEvent, !task); Paint(segTask, task);
+        Title = (task ? "タスク" : "予定") + (existing == null ? "を追加" : "を編集");
+        lblDate.Text = task ? "期限" : "開始日";
+        lblTime.Text = task ? "時刻（任意）" : "開始時刻";
+        SyncVisibility();
     }
 
     DatePicker Picker(DateOnly? d)
@@ -187,14 +233,27 @@ public class EventDialog : BaseDialog
 
     void SyncVisibility()
     {
-        bool ad = allDay.IsChecked == true;
+        if (segTask == null || done == null) return; // 画面を作っている途中
+        bool task = kind == "task";
+        bool nd = task && noDue.IsChecked == true;
+        bool ad = !task && allDay.IsChecked == true;
+        var show = (bool b) => b ? Visibility.Visible : Visibility.Collapsed;
+        allDay.Visibility = show(!task);
+        noDue.Visibility = show(task);
+        done.Visibility = show(task);
+        timeGrid1.Visibility = show(!nd);
+        timeGrid2.Visibility = show(!task);
+        repeatRow.Visibility = show(!task);
+        remindRow.Visibility = show(!nd);
         // 終日のときは時刻の欄を隠す
         ((FrameworkElement)timeGrid1.Children[1]).Visibility = ad ? Visibility.Hidden : Visibility.Visible;
         ((FrameworkElement)timeGrid2.Children[1]).Visibility = ad ? Visibility.Hidden : Visibility.Visible;
         untilField.Visibility = SelectedRepeat() == "none" ? Visibility.Hidden : Visibility.Visible;
         var rv = Reminds[Math.Max(remind.SelectedIndex, 0)].value;
         remindCustomField.Visibility = rv == -1 ? Visibility.Visible : Visibility.Hidden;
-        remindNote.Visibility = ad && rv != null ? Visibility.Visible : Visibility.Collapsed;
+        bool noTime = task ? string.IsNullOrWhiteSpace(tStart.Text) : ad;
+        remindNote.Text = task ? "時刻のないタスクは、期限の日の 9:00 を基準に通知します。" : "終日の予定は、その日の 9:00 を基準に通知します。";
+        remindNote.Visibility = show(!nd && noTime && rv != null);
     }
 
     string SelectedRepeat() => (repeat.SelectedItem as ComboBoxItem)?.Tag as string ?? "none";
@@ -225,10 +284,50 @@ public class EventDialog : BaseDialog
 
     void Warn(string m) => MessageBox.Show(this, m, Title, MessageBoxButton.OK, MessageBoxImage.Information);
 
+    int? ReadRemind(out bool ok)
+    {
+        ok = true;
+        int? rem = Reminds[Math.Max(remind.SelectedIndex, 0)].value;
+        if (rem != -1) return rem;
+        if (int.TryParse(remindCustom.Text.Trim(), out var n) && n >= 0 && n <= 43200) return n;
+        ok = false;
+        return null;
+    }
+
+    void SaveTask(string t)
+    {
+        bool nd = noDue.IsChecked == true;
+        string date = "";
+        if (!nd)
+        {
+            if (dStart.SelectedDate is not DateTime ds) { Warn("期限を選ぶか「期限なし」にしてください"); return; }
+            date = Dates.F(DateOnly.FromDateTime(ds));
+        }
+        var ts = date == "" ? "" : NormTime(tStart.Text);
+        if (ts == null) { Warn("時刻は 9:30 や 14:00 のように入れてください"); return; }
+        int? rem = null;
+        if (date != "")
+        {
+            rem = ReadRemind(out bool ok);
+            if (!ok) { Warn("通知は 0〜43200 分前の間で、数字で入れてください"); remindCustom.Focus(); return; }
+        }
+        bool isDone = done.IsChecked == true;
+        var ev = existing?.Clone() ?? new CalEvent { Id = NewId() };
+        ev.Kind = "task"; ev.Title = t; ev.Date = date; ev.EndDate = date; ev.AllDay = ts == "";
+        ev.Start = ts; ev.End = ""; ev.Repeat = "none"; ev.Until = ""; ev.Exdates = new List<string>();
+        ev.Color = color; ev.Memo = memo.Text; ev.Remind = rem;
+        ev.DoneAt = isDone ? (existing?.Done == true ? existing.DoneAt : Store.Now()) : null;
+        ev.Done = isDone;
+        ev.Deleted = false; ev.UpdatedAt = Store.Now();
+        Result = ev; JumpToDate = date != "";
+        Close();
+    }
+
     void Save()
     {
         var t = title.Text.Trim();
         if (t == "") { Warn("タイトルを入れてください"); title.Focus(); return; }
+        if (kind == "task") { SaveTask(t); return; }
         if (dStart.SelectedDate is not DateTime ds) { Warn("開始日を選んでください"); return; }
         var start = DateOnly.FromDateTime(ds);
         var end = dEnd.SelectedDate is DateTime de ? DateOnly.FromDateTime(de) : start;
@@ -249,6 +348,7 @@ public class EventDialog : BaseDialog
         var ev = existing?.Clone() ?? new CalEvent { Id = NewId(), Exdates = new List<string>() };
         ev.Title = t; ev.Date = Dates.F(start); ev.EndDate = Dates.F(end); ev.AllDay = ad;
         ev.Start = ts; ev.End = te; ev.Repeat = rep; ev.Until = until; ev.Color = color; ev.Memo = memo.Text; ev.Remind = rem;
+        ev.Kind = "event"; ev.Done = false; ev.DoneAt = null;
         ev.Deleted = false; ev.UpdatedAt = Store.Now();
         Result = ev; JumpToDate = true;
         Close();
@@ -306,12 +406,18 @@ public class SearchDialog : BaseDialog
         results.Children.Clear();
         var text = q.Text.Trim();
         if (text == "") { results.Children.Add(Note("言葉を入れると、タイトルとメモから探します")); return; }
-        var hits = main.Store.Live
+        var hits = main.Store.Live.Concat(main.Store.Tasks)
             .Where(e => ((e.Title ?? "") + " " + (e.Memo ?? "")).Contains(text, StringComparison.CurrentCultureIgnoreCase))
-            .OrderByDescending(e => e.Date, StringComparer.Ordinal).Take(100).ToList();
+            .OrderByDescending(e => e.Date ?? "", StringComparer.Ordinal).Take(100).ToList();
         if (hits.Count == 0) { results.Children.Add(Note("見つかりませんでした")); return; }
         foreach (var e in hits)
         {
+            if (e.IsTask)
+            {
+                var id = e.Id;
+                results.Children.Add(main.TaskItem(e, true, () => { Close(); main.OpenEditor(id, Dates.Today, null); }, () => { main.ToggleTask(id); Search(); }));
+                continue;
+            }
             var d = Dates.P(e.Date, Dates.Today);
             results.Children.Add(main.EventItem(e, d, $"{d.Year}/{d.Month}/{d.Day}({Dates.WD[(int)d.DayOfWeek]})",
                 () => { main.JumpTo(d); Close(); }, 120));
@@ -411,7 +517,7 @@ public class SettingsDialog : BaseDialog
 
     Border Sep() => new() { Height = 1, Background = P.Line, Margin = new Thickness(0, 14, 0, 14) };
 
-    void Paint() => status.Text = $"予定 {main.Store.Live.Count()}件（このPCに保存）\n" + main.SyncSummary();
+    void Paint() => status.Text = $"予定 {main.Store.Live.Count()}件・タスク {main.Store.Tasks.Count()}件（このPCに保存）\n" + main.SyncSummary();
 
     async Task Link()
     {

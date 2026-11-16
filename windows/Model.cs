@@ -25,6 +25,12 @@ public class CalEvent
     [JsonPropertyName("remind")] public int? Remind { get; set; }
     [JsonPropertyName("updatedAt")] public double UpdatedAt { get; set; }
     [JsonPropertyName("deleted")] public bool Deleted { get; set; }
+    /// <summary>"task" ならタスク（それ以外は予定）</summary>
+    [JsonPropertyName("kind")] public string? Kind { get; set; }
+    [JsonPropertyName("done")] public bool Done { get; set; }
+    [JsonPropertyName("doneAt")] public double? DoneAt { get; set; }
+
+    [JsonIgnore] public bool IsTask => Kind == "task";
 
     public CalEvent Clone()
     {
@@ -63,7 +69,27 @@ public class Store
     /// <summary>このPCで通知済みのもの（キー → 通知予定時刻）</summary>
     public Dictionary<string, double> Notified { get; set; } = new();
 
-    public IEnumerable<CalEvent> Live => Events.Values.Where(e => !e.Deleted && Dates.TryParse(e.Date, out _));
+    /// <summary>予定（タスクは含まない）</summary>
+    public IEnumerable<CalEvent> Live => Events.Values.Where(e => !e.Deleted && !e.IsTask && Dates.TryParse(e.Date, out _));
+    /// <summary>タスク（期限なしも含む）</summary>
+    public IEnumerable<CalEvent> Tasks => Events.Values.Where(e => !e.Deleted && e.IsTask);
+
+    public static int TaskOrder(CalEvent a, CalEvent b)
+    {
+        int c = a.Done.CompareTo(b.Done);
+        if (c == 0) c = string.CompareOrdinal(string.IsNullOrEmpty(a.Date) ? "9999" : a.Date, string.IsNullOrEmpty(b.Date) ? "9999" : b.Date);
+        if (c == 0) c = string.CompareOrdinal(string.IsNullOrEmpty(a.Start) ? "99" : a.Start, string.IsNullOrEmpty(b.Start) ? "99" : b.Start);
+        if (c == 0) c = string.Compare(a.Title, b.Title, StringComparison.CurrentCulture);
+        return c;
+    }
+
+    public List<CalEvent> TasksOn(DateOnly d)
+    {
+        var s = Dates.F(d);
+        var list = Tasks.Where(t => t.Date == s).ToList();
+        list.Sort(TaskOrder);
+        return list;
+    }
 
     public string GetToken()
     {
@@ -374,7 +400,7 @@ public static class Dates
     public static IEnumerable<(CalEvent e, DateOnly occ, DateTime fire)> DueReminders(Store store, DateTime now, TimeSpan window)
     {
         var today = DateOnly.FromDateTime(now);
-        foreach (var e in store.Live.ToList())
+        foreach (var e in store.Live.Concat(store.Tasks.Where(t => !t.Done)).ToList())
         {
             if (e.Remind is not int m || m < 0) continue;
             int ahead = m / 1440 + 2;
@@ -391,7 +417,8 @@ public static class Dates
 
     public static string ReminderText(CalEvent e, DateOnly occ)
     {
-        var s = $"{occ.Month}/{occ.Day}({WD[(int)occ.DayOfWeek]}) " + (e.AllDay ? "終日" : TimeLabel(e, occ, occ));
+        var s = $"{occ.Month}/{occ.Day}({WD[(int)occ.DayOfWeek]}) " +
+            (e.IsTask ? (string.IsNullOrEmpty(e.Start) ? "が期限" : e.Start + "まで") : e.AllDay ? "終日" : TimeLabel(e, occ, occ));
         int m = e.Remind ?? 0;
         s += m == 0 ? "（開始時刻）" : $"（{RemindLabel(m)}のお知らせ）";
         if (!string.IsNullOrWhiteSpace(e.Memo)) s += "\n" + e.Memo.Trim();

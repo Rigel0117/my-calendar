@@ -24,6 +24,14 @@ public class MainWindow : Window
     TextBlock titleText = null!, sideDate = null!, sideSub = null!, syncText = null!;
     Shapes.Ellipse syncDot = null!;
     StackPanel list = null!;
+    // タスク
+    string sideTab = "day";
+    Grid dayPane = null!, taskPane = null!;
+    Button addBtn = null!;
+    StackPanel taskList = null!;
+    TextBox quick = null!;
+    Border tabDay = null!, tabTasks = null!, taskBadge = null!;
+    TextBlock taskBadgeText = null!;
 
     // 同期
     public SyncState SyncStateNow = SyncState.Local;
@@ -237,25 +245,227 @@ public class MainWindow : Window
         var side = new Border { Background = P.Sheet, BorderBrush = P.Line, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10) };
         Grid.SetRow(side, 1); Grid.SetColumn(side, 2);
         var sideDock = new DockPanel();
+
+        // タブ（この日／タスク）
+        var tabs = new Grid { Margin = new Thickness(8, 6, 8, 0) };
+        tabs.ColumnDefinitions.Add(new ColumnDefinition()); tabs.ColumnDefinitions.Add(new ColumnDefinition());
+        tabDay = Tab("この日", null, () => SetTab("day"));
+        taskBadgeText = new TextBlock { FontSize = 11, Foreground = P.AccentInk, FontWeight = FontWeights.SemiBold };
+        taskBadge = new Border { Background = P.Accent, CornerRadius = new CornerRadius(9), Padding = new Thickness(7, 0, 7, 1), Margin = new Thickness(6, 0, 0, 0), Child = taskBadgeText, VerticalAlignment = VerticalAlignment.Center };
+        tabTasks = Tab("タスク", taskBadge, () => SetTab("tasks"));
+        Grid.SetColumn(tabTasks, 1);
+        tabs.Children.Add(tabDay); tabs.Children.Add(tabTasks);
+        var tabsBorder = new Border { BorderBrush = P.Line, BorderThickness = new Thickness(0, 0, 0, 1), Child = tabs };
+        DockPanel.SetDock(tabsBorder, Dock.Top);
+        sideDock.Children.Add(tabsBorder);
+
         var sideHead = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(18, 14, 18, 12) };
         sideDate = new TextBlock { FontFamily = UI.Num, FontSize = 32, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Bottom };
         sideSub = new TextBlock { Foreground = P.Muted, FontSize = 13, Margin = new Thickness(12, 0, 0, 5), VerticalAlignment = VerticalAlignment.Bottom };
         sideHead.Children.Add(sideDate); sideHead.Children.Add(sideSub);
         var headBorder = new Border { BorderBrush = P.Line, BorderThickness = new Thickness(0, 0, 0, 1), Child = sideHead };
-        DockPanel.SetDock(headBorder, Dock.Top);
-        sideDock.Children.Add(headBorder);
-        var add = UI.Btn(P, "＋ この日に予定を追加", () => OpenEditor(null, selected, null), UI.Kind.Primary, "予定を追加（Nキー）");
-        add.Margin = new Thickness(10); add.Padding = new Thickness(12, 11, 12, 11);
-        DockPanel.SetDock(add, Dock.Bottom);
-        sideDock.Children.Add(add);
+        addBtn = UI.Btn(P, "", AddFromSide, UI.Kind.Primary, "追加（Nキー）");
+        addBtn.Margin = new Thickness(10); addBtn.Padding = new Thickness(12, 11, 12, 11);
+        DockPanel.SetDock(addBtn, Dock.Bottom);
+        sideDock.Children.Add(addBtn);
+
+        // 「この日」の中身
+        dayPane = new Grid();
+        dayPane.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        dayPane.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        dayPane.Children.Add(headBorder);
         list = new StackPanel { Margin = new Thickness(8) };
-        sideDock.Children.Add(new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        var listScroll = new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Grid.SetRow(listScroll, 1);
+        dayPane.Children.Add(listScroll);
+
+        // 「タスク」の中身
+        taskPane = new Grid();
+        taskPane.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        taskPane.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        var quickRow = new DockPanel { Margin = new Thickness(8, 10, 8, 2) };
+        var quickAdd = UI.Btn(P, "追加", QuickAdd, UI.Kind.Primary);
+        quickAdd.Margin = new Thickness(6, 0, 0, 0);
+        DockPanel.SetDock(quickAdd, Dock.Right);
+        quick = UI.Styled(P, new TextBox { MaxLength = 200, VerticalContentAlignment = VerticalAlignment.Center });
+        UI.AutomationName(quick, "新しいタスク");
+        quick.ToolTip = "タスクを入力して Enter";
+        quick.KeyDown += (_, e) => { if (e.Key == Key.Enter) { QuickAdd(); e.Handled = true; } };
+        var quickHint = new TextBlock { Text = "タスクを入力して Enter", Foreground = P.Muted, IsHitTestVisible = false, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        quick.TextChanged += (_, _) => quickHint.Visibility = quick.Text == "" ? Visibility.Visible : Visibility.Collapsed;
+        var quickBox = new Grid(); quickBox.Children.Add(quick); quickBox.Children.Add(quickHint);
+        quickRow.Children.Add(quickAdd); quickRow.Children.Add(quickBox);
+        taskPane.Children.Add(quickRow);
+        taskList = new StackPanel { Margin = new Thickness(8) };
+        var taskScroll = new ScrollViewer { Content = taskList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Grid.SetRow(taskScroll, 1);
+        taskPane.Children.Add(taskScroll);
+
+        var panes = new Grid();
+        panes.Children.Add(dayPane); panes.Children.Add(taskPane);
+        sideDock.Children.Add(panes);
         side.Child = sideDock;
         root.Children.Add(side);
 
         Content = root;
+        SetTab(sideTab);
         Render();
         PaintSync();
+    }
+
+    Border Tab(string text, UIElement? extra, Action onClick)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
+        sp.Children.Add(new TextBlock { Text = text, FontWeight = FontWeights.SemiBold, FontSize = 14 });
+        if (extra != null) sp.Children.Add(extra);
+        var b = new Border { Child = sp, Padding = new Thickness(0, 9, 0, 8), Background = Brushes.Transparent, Cursor = Cursors.Hand, BorderThickness = new Thickness(0, 0, 0, 2) };
+        b.MouseLeftButtonUp += (_, _) => onClick();
+        UI.AutomationName(b, text);
+        return b;
+    }
+
+    void SetTab(string t)
+    {
+        sideTab = t;
+        void Paint(Border tab, bool on)
+        {
+            tab.BorderBrush = on ? P.Ink : Brushes.Transparent;
+            ((TextBlock)((StackPanel)tab.Child).Children[0]).Foreground = on ? P.Ink : P.Muted;
+        }
+        Paint(tabDay, t == "day"); Paint(tabTasks, t == "tasks");
+        dayPane.Visibility = t == "day" ? Visibility.Visible : Visibility.Collapsed;
+        taskPane.Visibility = t == "tasks" ? Visibility.Visible : Visibility.Collapsed;
+        addBtn.Content = t == "day" ? "＋ この日に予定を追加" : "＋ タスクを追加";
+        if (t == "tasks") quick.Focus();
+    }
+
+    void AddFromSide()
+    {
+        if (sideTab == "tasks") OpenEditor(null, selected, null, "task", true);
+        else OpenEditor(null, selected, null);
+    }
+
+    void QuickAdd()
+    {
+        var title = quick.Text.Trim();
+        if (title == "") return;
+        var t = new CalEvent
+        {
+            Id = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString("x") + Guid.NewGuid().ToString("N")[..6],
+            Kind = "task", Title = title, Date = "", EndDate = "", AllDay = true, Start = "", End = "", Repeat = "none", Until = "",
+            Exdates = new List<string>(), Color = UI.Colors[0], Memo = "", Done = false, UpdatedAt = Store.Now(),
+        };
+        Store.Events[t.Id] = t;
+        quick.Text = "";
+        Render();
+        Changed();
+    }
+
+    public void ToggleTask(string id)
+    {
+        if (!Store.Events.TryGetValue(id, out var t)) return;
+        var c = t.Clone();
+        c.Done = !t.Done;
+        c.DoneAt = c.Done ? Store.Now() : null;
+        c.UpdatedAt = Store.Now();
+        Store.Events[id] = c;
+        Render();
+        Changed();
+    }
+
+    string DueText(CalEvent t, out bool over)
+    {
+        over = false;
+        if (!Dates.TryParse(t.Date, out var d)) return "期限なし";
+        int dd = d.DayNumber - today.DayNumber;
+        string rel = dd switch { 0 => "今日", 1 => "明日", -1 => "昨日", _ => $"{d.Month}/{d.Day}({Dates.WD[(int)d.DayOfWeek]})" };
+        string txt = rel + (string.IsNullOrEmpty(t.Start) ? "" : " " + t.Start);
+        if (!t.Done && d < today) { over = true; return "期限切れ：" + txt; }
+        return "期限：" + txt;
+    }
+
+    /// <summary>タスク1件の行（チェックで完了、文字を押すと編集）</summary>
+    public FrameworkElement TaskItem(CalEvent t, bool showDue, Action? onOpen = null, Action? onToggle = null)
+    {
+        var id = t.Id;
+        onOpen ??= () => OpenEditor(id, selected, null);
+        onToggle ??= () => ToggleTask(id);
+        var col = Palette.B(Palette.C(t.Color));
+
+        var g = new Grid { Margin = new Thickness(0, 0, 0, 2) };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var box = new Border
+        {
+            Width = 22, Height = 22, CornerRadius = new CornerRadius(6), BorderBrush = col, BorderThickness = new Thickness(2),
+            Background = t.Done ? col : Brushes.Transparent, VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 1, 0, 0), Cursor = Cursors.Hand,
+            ToolTip = t.Done ? "未完了に戻す" : "完了にする",
+            Child = t.Done ? new TextBlock { Text = "\uE73E", FontFamily = UI.Icons, FontSize = 12, Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } : null,
+        };
+        UI.AutomationName(box, (t.Title ?? "") + (t.Done ? " を未完了に戻す" : " を完了にする"));
+        box.MouseLeftButtonUp += (_, e) => { e.Handled = true; onToggle(); };
+        g.Children.Add(box);
+
+        var body = new StackPanel { Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        var title = new TextBlock { Text = t.Title ?? "", TextWrapping = TextWrapping.Wrap, FontWeight = t.Done ? FontWeights.Normal : FontWeights.SemiBold, Foreground = t.Done ? P.Muted : P.Ink };
+        if (t.Done) title.TextDecorations = TextDecorations.Strikethrough;
+        body.Children.Add(title);
+        var parts = new List<string>();
+        bool over = false;
+        if (showDue) parts.Add(DueText(t, out over));
+        else if (!string.IsNullOrEmpty(t.Start)) parts.Add(t.Start + "まで");
+        if (t.Remind is int rm && rm >= 0) parts.Add("通知：" + Dates.RemindLabel(rm));
+        if (!string.IsNullOrWhiteSpace(t.Memo)) { var m = t.Memo.Trim().Split('\n')[0]; parts.Add(m.Length > 40 ? m[..40] + "…" : m); }
+        if (parts.Count > 0)
+            body.Children.Add(new TextBlock
+            {
+                Text = string.Join("　", parts), FontSize = 12.5, TextWrapping = TextWrapping.Wrap,
+                Foreground = over ? P.Sun : P.Muted, FontWeight = over ? FontWeights.Bold : FontWeights.Normal,
+            });
+        body.MouseLeftButtonUp += (_, _) => onOpen();
+        Grid.SetColumn(body, 1);
+        g.Children.Add(body);
+
+        var item = new Border { Child = g, Padding = new Thickness(10, 8, 10, 8), CornerRadius = new CornerRadius(8), Background = Brushes.Transparent };
+        item.MouseEnter += (_, _) => item.Background = P.Soft;
+        item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
+        return item;
+    }
+
+    TextBlock GroupHeader(string text, bool warn = false) => new()
+    {
+        Text = text, FontSize = 12, FontWeight = FontWeights.Bold, Foreground = warn ? P.Sun : P.Muted, Margin = new Thickness(10, 12, 10, 2),
+    };
+
+    void RenderTasks()
+    {
+        taskList.Children.Clear();
+        var all = Store.Tasks.ToList();
+        var open = all.Where(t => !t.Done).ToList();
+        open.Sort(Store.TaskOrder);
+        var todayS = Dates.F(today);
+        var over = open.Where(t => !string.IsNullOrEmpty(t.Date) && string.CompareOrdinal(t.Date, todayS) < 0).ToList();
+        var tod = open.Where(t => t.Date == todayS).ToList();
+        var later = open.Where(t => !string.IsNullOrEmpty(t.Date) && string.CompareOrdinal(t.Date, todayS) > 0).ToList();
+        var nodue = open.Where(t => string.IsNullOrEmpty(t.Date)).ToList();
+        var done = all.Where(t => t.Done).OrderByDescending(t => t.DoneAt ?? 0).Take(30).ToList();
+
+        void Group(string h, List<CalEvent> items, bool warn = false)
+        {
+            if (items.Count == 0) return;
+            taskList.Children.Add(GroupHeader($"{h}（{items.Count}）", warn));
+            foreach (var t in items) taskList.Children.Add(TaskItem(t, true));
+        }
+        Group("期限切れ", over, true); Group("今日", tod); Group("これから", later); Group("期限なし", nodue); Group("完了", done);
+        if (taskList.Children.Count == 0)
+            taskList.Children.Add(new TextBlock { Text = "タスクはありません。上の欄から追加できます。", Foreground = P.Muted, HorizontalAlignment = HorizontalAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 28, 0, 0) });
+
+        int n = over.Count + tod.Count;
+        taskBadgeText.Text = n.ToString();
+        taskBadge.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
+        taskBadge.ToolTip = $"期限切れ・今日のタスク {n}件";
     }
 
     int MaxChips()
@@ -352,6 +562,8 @@ public class MainWindow : Window
         string hol = Dates.HolidayName(d);
         var evs = Dates.EventsOn(Store, d);
         var singles = evs.Where(x => Dates.Span(x.e) == 0).ToList();
+        var dayTasks = Store.TasksOn(d);
+        int total = singles.Count + dayTasks.Count;
 
         var cell = new Grid { Background = other ? P.Tint(P.Soft.Color.ToString(), P.Dark ? 0.5 : 0.6) : Brushes.Transparent, Cursor = Cursors.Hand };
         var border = new Border { BorderBrush = P.Line, BorderThickness = new Thickness(0, 0, lastCol ? 0 : 1, lastRow ? 0 : 1) };
@@ -377,7 +589,7 @@ public class MainWindow : Window
 
         if (vis > 0) stack.Children.Add(new Border { Height = vis * LaneH - 1 });
         int room = maxChips - vis;
-        int show = singles.Count + hiddenBars > room ? Math.Max(room - 1, 0) : room;
+        int show = total + hiddenBars > room ? Math.Max(room - 1, 0) : room;
         foreach (var (e, st) in singles.Take(show))
         {
             var tb = new TextBlock { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, Foreground = e.AllDay ? Brushes.White : P.Ink };
@@ -391,7 +603,21 @@ public class MainWindow : Window
                 BorderBrush = col, BorderThickness = new Thickness(e.AllDay ? 0 : 3, 0, 0, 0),
             });
         }
-        int hidden = singles.Count - Math.Min(show, singles.Count) + hiddenBars;
+        foreach (var t in dayTasks.Take(Math.Max(show - singles.Count, 0)))
+        {
+            var col = Palette.B(Palette.C(t.Color));
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 2, 0, 1) };
+            row.Children.Add(new Border
+            {
+                Width = 10, Height = 10, CornerRadius = new CornerRadius(3), BorderBrush = col, BorderThickness = new Thickness(1.5),
+                Background = t.Done ? col : Brushes.Transparent, Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center,
+            });
+            var tt = new TextBlock { Text = t.Title ?? "", FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, Foreground = t.Done ? P.Muted : P.Ink };
+            if (t.Done) tt.TextDecorations = TextDecorations.Strikethrough;
+            row.Children.Add(tt);
+            stack.Children.Add(row);
+        }
+        int hidden = total - Math.Min(show, total) + hiddenBars;
         if (hidden > 0)
             stack.Children.Add(new TextBlock { Text = $"ほか{hidden}件", FontSize = 11, Foreground = P.Muted, Margin = new Thickness(4, 0, 0, 0) });
         cell.Children.Add(stack);
@@ -423,13 +649,17 @@ public class MainWindow : Window
 
         list.Children.Clear();
         var evs = Dates.EventsOn(Store, d);
-        if (evs.Count == 0)
-        {
-            list.Children.Add(new TextBlock { Text = "予定はありません", Foreground = P.Muted, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 28, 0, 0) });
-            return;
-        }
+        var ts = Store.TasksOn(d);
         foreach (var (e, st) in evs)
             list.Children.Add(EventItem(e, st, Dates.TimeLabel(e, st, d), () => OpenEditor(e.Id, d, st)));
+        if (ts.Count > 0)
+        {
+            list.Children.Add(GroupHeader("タスク"));
+            foreach (var t in ts) list.Children.Add(TaskItem(t, false));
+        }
+        if (evs.Count == 0 && ts.Count == 0)
+            list.Children.Add(new TextBlock { Text = "予定はありません", Foreground = P.Muted, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 28, 0, 0) });
+        RenderTasks();
     }
 
     public FrameworkElement EventItem(CalEvent e, DateOnly st, string timeText, Action onClick, double timeWidth = 96)
@@ -479,15 +709,15 @@ public class MainWindow : Window
         {
             case Key.Left: Go(-1); e.Handled = true; break;
             case Key.Right: Go(1); e.Handled = true; break;
-            case Key.N: OpenEditor(null, selected, null); e.Handled = true; break;
+            case Key.N: AddFromSide(); e.Handled = true; break;
             case Key.T: GoToday(); e.Handled = true; break;
         }
     }
 
-    void OpenEditor(string? id, DateOnly date, DateOnly? occ)
+    public void OpenEditor(string? id, DateOnly date, DateOnly? occ, string kind = "event", bool noDue = false)
     {
         CalEvent? existing = id != null && Store.Events.TryGetValue(id, out var ex) ? ex : null;
-        var dlg = new EventDialog(this, P, existing, date, occ);
+        var dlg = new EventDialog(this, P, existing, date, occ, kind, noDue);
         dlg.ShowDialog();
         if (dlg.Result == null) return;
         Store.Events[dlg.Result.Id] = dlg.Result;
