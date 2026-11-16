@@ -184,6 +184,12 @@ public static class Storage
     }
 }
 
+/// <summary>連日の予定を1週間の中で切り出したもの（バー1本分）</summary>
+public record SpanSeg(CalEvent E, DateOnly St, DateOnly En, int C0, int C1, bool Head, bool Tail)
+{
+    public int Lane { get; set; }
+}
+
 /// <summary>日付の計算・祝日・繰り返し</summary>
 public static class Dates
 {
@@ -295,6 +301,41 @@ public static class Dates
             .OrderBy(x => Key(x), StringComparer.Ordinal)
             .ThenBy(x => x.e.Title ?? "", StringComparer.CurrentCulture)
             .ToList();
+    }
+
+    /// <summary>1週間分の「連日の予定」を、重ならないように段（レーン）に並べる</summary>
+    public static (List<SpanSeg> segs, int lanes) WeekLayout(Store store, DateOnly wStart)
+    {
+        var wEnd = wStart.AddDays(6);
+        var segs = new List<SpanSeg>();
+        var seen = new HashSet<string>();
+        foreach (var e in store.Live)
+        {
+            int span = Span(e);
+            if (span == 0) continue;
+            for (int c = 0; c < 7; c++)
+            {
+                var st0 = OccurrenceStart(e, wStart.AddDays(c));
+                if (st0 == null) continue;
+                var st = st0.Value;
+                if (!seen.Add(e.Id + "|" + F(st))) continue;
+                var en = st.AddDays(span);
+                segs.Add(new SpanSeg(e, st, en,
+                    Math.Max(0, st.DayNumber - wStart.DayNumber), Math.Min(6, en.DayNumber - wStart.DayNumber),
+                    st >= wStart, en <= wEnd));
+            }
+        }
+        var ordered = segs.OrderBy(x => x.St).ThenByDescending(x => x.En).ThenByDescending(x => x.E.AllDay).ToList();
+        var lanes = new List<List<(int a, int b)>>();
+        foreach (var x in ordered)
+        {
+            int i = 0;
+            while (i < lanes.Count && lanes[i].Any(r => !(x.C1 < r.a || x.C0 > r.b))) i++;
+            if (i == lanes.Count) lanes.Add(new List<(int a, int b)>());
+            lanes[i].Add((x.C0, x.C1));
+            x.Lane = i;
+        }
+        return (ordered, lanes.Count);
     }
 
     public static string TimeLabel(CalEvent e, DateOnly st, DateOnly s)

@@ -68,7 +68,15 @@ main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:0 16px 16px;m
 .dow{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);text-align:center}
 .dow div{padding:6px 0}
 .dow .su{color:var(--sun)}.dow .sa{color:var(--sat)}
-.grid{display:grid;grid-template-columns:repeat(7,1fr);grid-auto-rows:1fr;min-height:0}
+.grid{display:flex;flex-direction:column;min-height:0}
+.week{display:grid;grid-template-columns:repeat(7,1fr);position:relative;flex:1 1 0;min-height:0}
+.span-bar{position:absolute;height:17px;line-height:17px;font-size:11.5px;color:#fff;background:var(--c);padding:0 6px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;cursor:pointer;z-index:1}
+.span-bar.head{border-top-left-radius:5px;border-bottom-left-radius:5px}
+.span-bar.tail{border-top-right-radius:5px;border-bottom-right-radius:5px}
+.span-bar:hover{filter:brightness(1.08)}
+.span-bar .cont{font-size:8px;opacity:.8;margin-right:4px;vertical-align:1px}
+.lane-space{flex:none}
 .day{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:4px 4px 2px;min-width:0;min-height:0;overflow:hidden;
   background:none;border-top:0;border-left:0;text-align:left;display:flex;flex-direction:column;gap:2px;position:relative}
 .day:nth-child(7n){border-right:0}
@@ -156,7 +164,9 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0}
   .hide-sm{display:none}
   main{grid-template-columns:1fr;grid-template-rows:auto 1fr;padding:0 12px 12px;gap:10px}
   .cal{height:auto}
-  .grid{grid-auto-rows:52px}
+  .week{flex:none;height:58px}
+  .span-bar{height:4px;padding:0;font-size:0;pointer-events:none;border-radius:0}
+  .span-bar.head{margin-left:2px}
   .day{padding:3px 2px;align-items:center}
   .num-row{justify-content:center}
   .chip,.more,.hol-name{display:none}
@@ -341,6 +351,29 @@ function eventsOn(s){
   return live().map(e=>{const st=occurrenceStart(e,s); return st?{e,st}:null;}).filter(Boolean)
     .sort((x,y)=>key(x).localeCompare(key(y))||x.e.title.localeCompare(y.e.title));
 }
+const spanOf=e=>Math.min(Math.max(diffDays(e.date,e.endDate||e.date),0),62);
+const fmtMD=s=>{const d=parse(s);return (d.getMonth()+1)+"/"+d.getDate();};
+const isMobile=()=>matchMedia("(max-width:860px)").matches;
+/* 1週間分の「連日の予定」を、重ならないように段（レーン）に並べる */
+function weekLayout(wStart){
+  const wEnd=addDays(wStart,6), segs=[], seen=new Set();
+  for(const e of live()){
+    const span=spanOf(e); if(!span) continue;
+    for(let c=0;c<7;c++){
+      const st=occurrenceStart(e,addDays(wStart,c)); if(!st) continue;
+      const key=e.id+"|"+st; if(seen.has(key)) continue; seen.add(key);
+      const en=addDays(st,span);
+      segs.push({e,st,en,c0:Math.max(0,diffDays(wStart,st)),c1:Math.min(6,diffDays(wStart,en)),head:st>=wStart,tail:en<=wEnd});
+    }
+  }
+  segs.sort((a,b)=>a.st.localeCompare(b.st)||(b.en.localeCompare(a.en))||(b.e.allDay-a.e.allDay));
+  const lanes=[];
+  for(const x of segs){
+    let i=0; while(lanes[i]&&lanes[i].some(([a,b])=>!(x.c1<a||x.c0>b))) i++;
+    (lanes[i]=lanes[i]||[]).push([x.c0,x.c1]); x.lane=i;
+  }
+  return {segs,laneCount:lanes.length};
+}
 function timeLabel(e,st,s){
   if(e.allDay) return "終日";
   const span=diffDays(e.date,e.endDate||e.date), en=addDays(st,span);
@@ -374,25 +407,56 @@ function render(){
   const lead=(first.getDay()-ws+7)%7;
   const start=ymd(new Date(view.y,view.m,1-lead));
   const days=Math.ceil((lead+new Date(view.y,view.m+1,0).getDate())/7)*7;
-  const g=$("grid"); g.style.gridTemplateRows=""; g.innerHTML="";
-  const cellH=g.clientHeight/(days/7);
+  const g=$("grid"); g.innerHTML="";
+  const weeks=days/7, mobile=isMobile();
+  const cellH=g.clientHeight/weeks;
   const maxChips=Math.max(1,Math.floor((cellH-34)/19));
-  for(let i=0;i<days;i++){
-    const s=addDays(start,i), d=parse(s), w=d.getDay(), hn=holidayName(s);
-    const evs=eventsOn(s);
-    const b=document.createElement("button");
-    b.type="button";
-    b.className="day"+(d.getMonth()!==view.m?" other":"")+(w===0?" su":"")+(w===6?" sa":"")+(hn?" hol":"")+(s===today?" today":"")+(s===selected?" sel":"");
-    b.dataset.date=s;
-    b.setAttribute("aria-label",`${d.getMonth()+1}月${d.getDate()}日 ${hn} 予定${evs.length}件`);
-    let html=`<div class="num-row"><span class="num">${d.getDate()}</span>${hn?`<span class="hol-name">${hn}</span>`:""}</div>`;
-    const shown=evs.slice(0, evs.length>maxChips?maxChips-1:maxChips);
-    html+=shown.map(({e,st})=>{const tl=e.allDay||st!==s?"":(e.start||"");
-      return `<div class="chip${e.allDay?" allday":""}" style="--c:${esc(e.color)}">${tl?`<b>${tl}</b> `:""}${esc(e.title)}</div>`;}).join("");
-    if(evs.length>shown.length) html+=`<div class="more">ほか${evs.length-shown.length}件</div>`;
-    html+=`<div class="dots">${evs.slice(0,4).map(({e})=>`<i style="--c:${esc(e.color)}"></i>`).join("")}</div>`;
-    b.innerHTML=html;
-    g.appendChild(b);
+  const LANE=mobile?6:19, TOP=mobile?30:30;
+  for(let w=0;w<weeks;w++){
+    const wStart=addDays(start,w*7);
+    const {segs,laneCount}=weekLayout(wStart);
+    // 長いバーを何段まで表示するか（残りは「ほか○件」）
+    const vis=mobile?Math.min(laneCount,3):(laneCount<=maxChips?laneCount:Math.max(maxChips-1,0));
+    const week=document.createElement("div"); week.className="week";
+    for(let c=0;c<7;c++){
+      const s=addDays(wStart,c), d=parse(s), wd=d.getDay(), hn=holidayName(s);
+      const all=eventsOn(s);
+      const singles=all.filter(({e})=>spanOf(e)===0);
+      const hiddenBars=segs.filter(x=>x.c0<=c&&c<=x.c1&&x.lane>=vis).length;
+      const room=maxChips-vis;
+      const nShow=singles.length+hiddenBars>room?Math.max(room-1,0):room;
+      const shown=singles.slice(0,nShow);
+      const hidden=singles.length-shown.length+hiddenBars;
+      const b=document.createElement("button");
+      b.type="button";
+      b.className="day"+(d.getMonth()!==view.m?" other":"")+(wd===0?" su":"")+(wd===6?" sa":"")+(hn?" hol":"")+(s===today?" today":"")+(s===selected?" sel":"");
+      b.dataset.date=s;
+      b.setAttribute("aria-label",`${d.getMonth()+1}月${d.getDate()}日 ${hn} 予定${all.length}件`);
+      let html=`<div class="num-row"><span class="num">${d.getDate()}</span>${hn?`<span class="hol-name">${hn}</span>`:""}</div>`;
+      if(vis) html+=`<div class="lane-space" style="height:${vis*LANE-2}px"></div>`;
+      html+=shown.map(({e})=>{const tl=e.allDay?"":(e.start||"");
+        return `<div class="chip${e.allDay?" allday":""}" style="--c:${esc(e.color)}">${tl?`<b>${tl}</b> `:""}${esc(e.title)}</div>`;}).join("");
+      if(hidden>0) html+=`<div class="more">ほか${hidden}件</div>`;
+      html+=`<div class="dots">${singles.slice(0,4).map(({e})=>`<i style="--c:${esc(e.color)}"></i>`).join("")}</div>`;
+      b.innerHTML=html;
+      week.appendChild(b);
+    }
+    // 連日の予定を1本のバーで描く
+    for(const x of segs){
+      if(x.lane>=vis) continue;
+      const bar=document.createElement("div");
+      bar.className="span-bar"+(x.head?" head":"")+(x.tail?" tail":"");
+      bar.style.setProperty("--c",x.e.color||"#3b6fd4");
+      bar.style.left=`calc(${x.c0}*100%/7 + 3px)`;
+      bar.style.width=`calc(${x.c1-x.c0+1}*100%/7 - 7px)`;
+      bar.style.top=(TOP+x.lane*LANE)+"px";
+      bar.dataset.id=x.e.id; bar.dataset.st=x.st;
+      const tl=!x.e.allDay&&x.head&&x.e.start?`<b>${esc(x.e.start)}</b> `:"";
+      bar.innerHTML=(x.head?"":"<span class=\"cont\">◀</span>")+tl+esc(x.e.title);
+      bar.title=`${x.e.title}（${fmtMD(x.st)}〜${fmtMD(x.en)}）`;
+      week.appendChild(bar);
+    }
+    g.appendChild(week);
   }
   renderSide();
 }
@@ -414,7 +478,9 @@ function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&l
 function go(delta){ view.m+=delta; if(view.m<0){view.m=11;view.y--;} if(view.m>11){view.m=0;view.y++;} render(); }
 $("prev").onclick=()=>go(-1); $("next").onclick=()=>go(1);
 $("today").onclick=()=>{const d=new Date();view={y:d.getFullYear(),m:d.getMonth()};selected=ymd(d);render();};
-$("grid").addEventListener("click",ev=>{const b=ev.target.closest(".day");if(!b)return;
+$("grid").addEventListener("click",ev=>{
+  const bar=ev.target.closest(".span-bar"); if(bar){openEditor(bar.dataset.id,bar.dataset.st,bar.dataset.st);return;}
+  const b=ev.target.closest(".day");if(!b)return;
   const s=b.dataset.date; if(s===selected && matchMedia("(min-width:861px)").matches){openEditor(null,s);return;}
   selected=s; const d=parse(s); if(d.getMonth()!==view.m||d.getFullYear()!==view.y){view={y:d.getFullYear(),m:d.getMonth()};}
   render();});

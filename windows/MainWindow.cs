@@ -235,21 +235,62 @@ public class MainWindow : Window
         for (int c = 0; c < 7; c++) calGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         int maxChips = lastMaxChips = MaxChips();
-        for (int i = 0; i < days; i++)
+        for (int w = 0; w < rows; w++)
         {
-            var d = start.AddDays(i);
-            var cell = DayCell(d, maxChips, i % 7 == 6, i / 7 == rows - 1);
-            Grid.SetRow(cell, i / 7); Grid.SetColumn(cell, i % 7);
-            calGrid.Children.Add(cell);
+            var wStart = start.AddDays(w * 7);
+            var (segs, laneCount) = Dates.WeekLayout(Store, wStart);
+            // 長いバーを何段まで表示するか（残りは「ほか○件」）
+            int vis = laneCount <= maxChips ? laneCount : Math.Max(maxChips - 1, 0);
+            for (int c = 0; c < 7; c++)
+            {
+                var d = wStart.AddDays(c);
+                int col = c;
+                int hiddenBars = segs.Count(x => x.C0 <= col && col <= x.C1 && x.Lane >= vis);
+                var cell = DayCell(d, maxChips, vis, hiddenBars, c == 6, w == rows - 1);
+                Grid.SetRow(cell, w); Grid.SetColumn(cell, c);
+                calGrid.Children.Add(cell);
+            }
+            // 連日の予定を1本のバーで描く
+            foreach (var x in segs.Where(sg => sg.Lane < vis))
+            {
+                var bar = SpanBar(x);
+                Grid.SetRow(bar, w); Grid.SetColumn(bar, x.C0); Grid.SetColumnSpan(bar, x.C1 - x.C0 + 1);
+                Panel.SetZIndex(bar, 5);
+                calGrid.Children.Add(bar);
+            }
         }
         RenderSide();
     }
 
-    FrameworkElement DayCell(DateOnly d, int maxChips, bool lastCol, bool lastRow)
+    const int LaneH = 20, BarTop = 33;
+
+    FrameworkElement SpanBar(SpanSeg x)
+    {
+        var e = x.E;
+        var tb = new TextBlock { FontSize = 12, Foreground = Brushes.White, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        if (!x.Head) tb.Inlines.Add(new Run("◀ ") { FontSize = 8 });
+        if (!e.AllDay && x.Head && !string.IsNullOrEmpty(e.Start)) tb.Inlines.Add(new Run(e.Start + " ") { FontWeight = FontWeights.Bold });
+        tb.Inlines.Add(new Run(e.Title ?? ""));
+        double l = x.Head ? 5 : 0, r = x.Tail ? 5 : 0;
+        var bar = new Border
+        {
+            Child = tb, Background = Palette.B(Palette.C(e.Color)), Height = 18, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(3, BarTop + x.Lane * LaneH, 4, 0), Padding = new Thickness(6, 0, 6, 0),
+            CornerRadius = new CornerRadius(l, r, r, l), Cursor = Cursors.Hand,
+            ToolTip = $"{e.Title}（{x.St.Month}/{x.St.Day}〜{x.En.Month}/{x.En.Day}）",
+        };
+        bar.MouseEnter += (_, _) => bar.Opacity = 0.88;
+        bar.MouseLeave += (_, _) => bar.Opacity = 1;
+        bar.MouseLeftButtonUp += (_, _) => OpenEditor(e.Id, x.St, x.St);
+        return bar;
+    }
+
+    FrameworkElement DayCell(DateOnly d, int maxChips, int vis, int hiddenBars, bool lastCol, bool lastRow)
     {
         bool other = d.Month != vm;
         string hol = Dates.HolidayName(d);
         var evs = Dates.EventsOn(Store, d);
+        var singles = evs.Where(x => Dates.Span(x.e) == 0).ToList();
 
         var cell = new Grid { Background = other ? P.Tint(P.Soft.Color.ToString(), P.Dark ? 0.5 : 0.6) : Brushes.Transparent, Cursor = Cursors.Hand };
         var border = new Border { BorderBrush = P.Line, BorderThickness = new Thickness(0, 0, lastCol ? 0 : 1, lastRow ? 0 : 1) };
@@ -273,8 +314,10 @@ public class MainWindow : Window
             numRow.Children.Add(new TextBlock { Text = hol, FontSize = 10.5, Foreground = P.Sun, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis });
         stack.Children.Add(numRow);
 
-        int show = evs.Count > maxChips ? maxChips - 1 : maxChips;
-        foreach (var (e, st) in evs.Take(Math.Max(show, 0)))
+        if (vis > 0) stack.Children.Add(new Border { Height = vis * LaneH - 1 });
+        int room = maxChips - vis;
+        int show = singles.Count + hiddenBars > room ? Math.Max(room - 1, 0) : room;
+        foreach (var (e, st) in singles.Take(show))
         {
             var tb = new TextBlock { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, Foreground = e.AllDay ? Brushes.White : P.Ink };
             if (!e.AllDay && st == d && !string.IsNullOrEmpty(e.Start)) tb.Inlines.Add(new Run(e.Start + " ") { FontWeight = FontWeights.Bold });
@@ -287,8 +330,9 @@ public class MainWindow : Window
                 BorderBrush = col, BorderThickness = new Thickness(e.AllDay ? 0 : 3, 0, 0, 0),
             });
         }
-        if (evs.Count > Math.Max(show, 0))
-            stack.Children.Add(new TextBlock { Text = $"ほか{evs.Count - Math.Max(show, 0)}件", FontSize = 11, Foreground = P.Muted, Margin = new Thickness(4, 0, 0, 0) });
+        int hidden = singles.Count - Math.Min(show, singles.Count) + hiddenBars;
+        if (hidden > 0)
+            stack.Children.Add(new TextBlock { Text = $"ほか{hidden}件", FontSize = 11, Foreground = P.Muted, Margin = new Thickness(4, 0, 0, 0) });
         cell.Children.Add(stack);
 
         if (d == selected)
