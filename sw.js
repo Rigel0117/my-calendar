@@ -1,6 +1,6 @@
 // オフラインで開けるように、アプリ本体を端末にしまっておく仕組み
 // アプリを更新したら VERSION の数字を上げてください
-const VERSION = "mycal-v4";
+const VERSION = "mycal-v5";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (e) => {

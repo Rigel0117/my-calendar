@@ -113,6 +113,41 @@ main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:0 16px 16px;m
 .item .memo{font-size:12.5px;color:var(--muted);white-space:pre-wrap;word-break:break-word;margin-top:2px}
 .item .rep{font-size:11px;color:var(--muted)}
 .empty{color:var(--muted);text-align:center;padding:28px 12px;font-size:14px}
+/* タブ（この日／タスク） */
+.tabs{display:flex;padding:6px 8px 0;border-bottom:1px solid var(--line);flex:none}
+.tab{flex:1;border:0;background:none;padding:9px 6px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--ink)}
+.count{font-size:11px;background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:1px 7px;margin-left:4px;font-variant-numeric:tabular-nums}
+.count:empty{display:none}
+.pane{display:flex;flex-direction:column;min-height:0;flex:1}
+.pane[hidden]{display:none}
+/* タスク */
+.titem{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:8px}
+.titem:hover{background:var(--soft)}
+.check{flex:none;width:22px;height:22px;border-radius:6px;border:2px solid var(--c);background:none;margin-top:1px;display:grid;place-items:center;padding:0}
+.titem.done .check{background:var(--c)}
+.titem.done .check::after{content:"";width:6px;height:11px;border:solid #fff;border-width:0 2px 2px 0;transform:translate(0,-1px) rotate(45deg)}
+.tbody{flex:1;border:0;background:none;text-align:left;padding:0;min-width:0}
+.tbody .ti{font-weight:600;word-break:break-word}
+.titem.done .ti{text-decoration:line-through;color:var(--muted);font-weight:500}
+.tmeta{font-size:12.5px;color:var(--muted)}
+.tmeta .over{color:var(--sun);font-weight:700}
+.group-h{font-size:12px;font-weight:700;color:var(--muted);padding:12px 10px 2px;letter-spacing:.04em}
+.group-h.over{color:var(--sun)}
+.quick{display:flex;gap:6px;padding:10px 8px 2px;flex:none}
+.quick input{flex:1;min-width:0;border:1px solid var(--line);background:var(--paper);border-radius:8px;padding:9px 10px;min-height:40px}
+.quick button{border:0;border-radius:8px;background:var(--ink);color:var(--paper);padding:0 14px;font-weight:600}
+.chip.task{background:none;border-left:0;padding-left:2px;display:flex;align-items:center;gap:4px}
+.chip.task .ck{width:10px;height:10px;border:1.5px solid var(--c);border-radius:3px;flex:none}
+.chip.task.done{color:var(--muted);text-decoration:line-through}
+.chip.task.done .ck{background:var(--c)}
+.dots i.sq{border-radius:2px}
+.dots i.sq.done{opacity:.35}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px;margin-bottom:14px;background:var(--paper)}
+.seg button{border:0;background:none;padding:6px 18px;border-radius:999px;font-weight:600;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+#evForm.task-mode .ev-only{display:none!important}
+#evForm:not(.task-mode) .task-only{display:none!important}
 .add-btn{margin:8px;border:0;border-radius:8px;background:var(--ink);color:var(--paper);padding:12px;font-weight:600}
 .fab{display:none}
 
@@ -169,7 +204,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0}
   .span-bar.head{margin-left:2px}
   .day{padding:3px 2px;align-items:center}
   .num-row{justify-content:center}
-  .chip,.more,.hol-name{display:none}
+  .chip,.chip.task,.more,.hol-name{display:none}
   .dots{display:flex;justify-content:center}
   .side-date{font-size:24px}
   .add-btn{display:none}
@@ -200,9 +235,19 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0}
       <div class="dow" id="dow"></div>
       <div class="grid" id="grid"></div>
     </section>
-    <aside class="side" aria-label="選択した日の予定">
-      <div class="side-head"><div class="side-date" id="sideDate"></div><div class="side-sub" id="sideSub"></div></div>
-      <div class="list" id="list"></div>
+    <aside class="side" aria-label="選択した日の予定とタスク">
+      <div class="tabs" role="tablist">
+        <button class="tab" id="tabDay" role="tab" aria-selected="true">この日</button>
+        <button class="tab" id="tabTasks" role="tab" aria-selected="false">タスク<span class="count" id="taskCount"></span></button>
+      </div>
+      <div class="pane" id="dayPane">
+        <div class="side-head"><div class="side-date" id="sideDate"></div><div class="side-sub" id="sideSub"></div></div>
+        <div class="list" id="list"></div>
+      </div>
+      <div class="pane" id="taskPane" hidden>
+        <form class="quick" id="quickForm" autocomplete="off"><input type="text" id="quickTask" placeholder="タスクを入力して Enter" maxlength="200" aria-label="新しいタスク"><button type="submit">追加</button></form>
+        <div class="list" id="taskList"></div>
+      </div>
       <button class="add-btn" id="addBtn">＋ この日に予定を追加</button>
     </aside>
   </main>
@@ -213,28 +258,31 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0}
 <div class="backdrop" id="evDlg" role="dialog" aria-modal="true" aria-labelledby="evDlgTitle">
   <form class="sheet" id="evForm" autocomplete="off">
     <h2 id="evDlgTitle">予定を追加</h2>
+    <div class="seg" id="kindSeg" role="group" aria-label="種類"><button type="button" data-k="event" aria-pressed="true">予定</button><button type="button" data-k="task" aria-pressed="false">タスク</button></div>
     <div class="field"><label for="fTitle">タイトル</label><input type="text" id="fTitle" class="title-input" placeholder="例：歯医者" required maxlength="200"></div>
-    <label class="toggle"><input type="checkbox" id="fAllDay"> 終日</label>
-    <div class="row">
-      <div class="field"><label for="fDate">開始日</label><input type="date" id="fDate" required></div>
-      <div class="field timef"><label for="fStart">開始時刻</label><input type="time" id="fStart" step="300"></div>
+    <label class="toggle ev-only"><input type="checkbox" id="fAllDay"> 終日</label>
+    <label class="toggle task-only"><input type="checkbox" id="fNoDue"> 期限なし</label>
+    <div class="row" id="dateRow">
+      <div class="field"><label for="fDate" id="fDateLbl">開始日</label><input type="date" id="fDate"></div>
+      <div class="field timef"><label for="fStart" id="fStartLbl">開始時刻</label><input type="time" id="fStart" step="300"></div>
     </div>
-    <div class="row">
-      <div class="field"><label for="fEndDate">終了日</label><input type="date" id="fEndDate" required></div>
+    <div class="row ev-only">
+      <div class="field"><label for="fEndDate">終了日</label><input type="date" id="fEndDate"></div>
       <div class="field timef"><label for="fEnd">終了時刻</label><input type="time" id="fEnd" step="300"></div>
     </div>
-    <div class="row">
+    <div class="row ev-only">
       <div class="field"><label for="fRepeat">繰り返し</label>
         <select id="fRepeat"><option value="none">なし</option><option value="daily">毎日</option><option value="weekly">毎週</option><option value="monthly">毎月（同じ日）</option><option value="yearly">毎年</option></select></div>
       <div class="field" id="untilField"><label for="fUntil">繰り返しの終了日（任意）</label><input type="date" id="fUntil"></div>
     </div>
-    <div class="row">
+    <div class="row" id="remindRow">
       <div class="field"><label for="fRemind">通知</label>
         <select id="fRemind"><option value="none">なし</option><option value="0">開始時刻ちょうど</option><option value="5">5分前</option><option value="10">10分前</option><option value="15">15分前</option><option value="30">30分前</option><option value="60">1時間前</option><option value="120">2時間前</option><option value="1440">1日前</option><option value="2880">2日前</option><option value="10080">1週間前</option><option value="custom">時間を指定…</option></select></div>
       <div class="field" id="remindCustomField"><label for="fRemindCustom">何分前に通知するか</label><input type="number" id="fRemindCustom" min="0" max="43200" step="1" inputmode="numeric" placeholder="例：45"></div>
     </div>
     <p class="note" id="remindNote">終日の予定は、その日の 9:00 を基準に通知します。通知は Discord と Windows版のアプリに届きます。</p>
     <div class="field"><span class="lbl">色</span><div class="swatches" id="swatches"></div></div>
+    <label class="toggle task-only"><input type="checkbox" id="fDone"> 完了</label>
     <div class="field"><label for="fMemo">メモ</label><textarea id="fMemo" maxlength="5000" placeholder="場所や持ち物など"></textarea></div>
     <div class="actions">
       <div class="left">
@@ -250,7 +298,7 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0}
 <!-- 検索 -->
 <div class="backdrop" id="searchDlg" role="dialog" aria-modal="true" aria-labelledby="searchTitle">
   <div class="sheet">
-    <h2 id="searchTitle">予定を検索</h2>
+    <h2 id="searchTitle">予定・タスクを検索</h2>
     <div class="field"><label for="q">タイトル・メモに含まれる言葉</label><input type="search" id="q" placeholder="例：会議"></div>
     <div class="results" id="results"></div>
     <div class="actions"><button type="button" class="btn" data-close>閉じる</button></div>
@@ -330,6 +378,11 @@ function load(){
 }
 function save(){ try{localStorage.setItem(KEY,JSON.stringify(store));}catch(e){toast("この端末に保存できませんでした");} }
 const live=()=>Object.values(store.events).filter(e=>!e.deleted);
+const isTask=e=>e.kind==="task";
+const liveEvents=()=>live().filter(e=>!isTask(e)&&e.date);
+const allTasks=()=>live().filter(isTask);
+const taskSort=(a,b)=>(a.done-b.done)||(a.date||"9999").localeCompare(b.date||"9999")||(a.start||"99").localeCompare(b.start||"99")||a.title.localeCompare(b.title);
+const tasksOn=s=>allTasks().filter(t=>t.date===s).sort(taskSort);
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 
 /* 予定がその日に入っているか（繰り返し・複数日に対応） */
@@ -354,7 +407,7 @@ function occurrenceStart(e,s){ // sの日に表示されるなら、その回の
 }
 function eventsOn(s){
   const key=({e,st})=>e.allDay?"0":st<s?"1":"2"+(e.start||"");
-  return live().map(e=>{const st=occurrenceStart(e,s); return st?{e,st}:null;}).filter(Boolean)
+  return liveEvents().map(e=>{const st=occurrenceStart(e,s); return st?{e,st}:null;}).filter(Boolean)
     .sort((x,y)=>key(x).localeCompare(key(y))||x.e.title.localeCompare(y.e.title));
 }
 const spanOf=e=>Math.min(Math.max(diffDays(e.date,e.endDate||e.date),0),62);
@@ -363,7 +416,7 @@ const isMobile=()=>matchMedia("(max-width:860px)").matches;
 /* 1週間分の「連日の予定」を、重ならないように段（レーン）に並べる */
 function weekLayout(wStart){
   const wEnd=addDays(wStart,6), segs=[], seen=new Set();
-  for(const e of live()){
+  for(const e of liveEvents()){
     const span=spanOf(e); if(!span) continue;
     for(let c=0;c<7;c++){
       const st=occurrenceStart(e,addDays(wStart,c)); if(!st) continue;
@@ -428,22 +481,26 @@ function render(){
       const s=addDays(wStart,c), d=parse(s), wd=d.getDay(), hn=holidayName(s);
       const all=eventsOn(s);
       const singles=all.filter(({e})=>spanOf(e)===0);
+      const dayTasks=tasksOn(s);
       const hiddenBars=segs.filter(x=>x.c0<=c&&c<=x.c1&&x.lane>=vis).length;
       const room=maxChips-vis;
-      const nShow=singles.length+hiddenBars>room?Math.max(room-1,0):room;
-      const shown=singles.slice(0,nShow);
-      const hidden=singles.length-shown.length+hiddenBars;
+      const items=[...singles.map(x=>({ev:x.e})),...dayTasks.map(t=>({task:t}))];
+      const nShow=items.length+hiddenBars>room?Math.max(room-1,0):room;
+      const shown=items.slice(0,nShow);
+      const hidden=items.length-shown.length+hiddenBars;
       const b=document.createElement("button");
       b.type="button";
       b.className="day"+(d.getMonth()!==view.m?" other":"")+(wd===0?" su":"")+(wd===6?" sa":"")+(hn?" hol":"")+(s===today?" today":"")+(s===selected?" sel":"");
       b.dataset.date=s;
-      b.setAttribute("aria-label",`${d.getMonth()+1}月${d.getDate()}日 ${hn} 予定${all.length}件`);
+      b.setAttribute("aria-label",`${d.getMonth()+1}月${d.getDate()}日 ${hn} 予定${all.length}件${dayTasks.length?` タスク${dayTasks.length}件`:""}`);
       let html=`<div class="num-row"><span class="num">${d.getDate()}</span>${hn?`<span class="hol-name">${hn}</span>`:""}</div>`;
       if(vis) html+=`<div class="lane-space" style="height:${vis*LANE-2}px"></div>`;
-      html+=shown.map(({e})=>{const tl=e.allDay?"":(e.start||"");
+      html+=shown.map(({ev:e,task:t})=>{
+        if(t) return `<div class="chip task${t.done?" done":""}" style="--c:${esc(t.color)}"><span class="ck"></span>${esc(t.title)}</div>`;
+        const tl=e.allDay?"":(e.start||"");
         return `<div class="chip${e.allDay?" allday":""}" style="--c:${esc(e.color)}">${tl?`<b>${tl}</b> `:""}${esc(e.title)}</div>`;}).join("");
       if(hidden>0) html+=`<div class="more">ほか${hidden}件</div>`;
-      html+=`<div class="dots">${singles.slice(0,4).map(({e})=>`<i style="--c:${esc(e.color)}"></i>`).join("")}</div>`;
+      html+=`<div class="dots">${singles.slice(0,4).map(({e})=>`<i style="--c:${esc(e.color)}"></i>`).join("")}${dayTasks.slice(0,3).map(t=>`<i class="sq${t.done?" done":""}" style="--c:${esc(t.color)}"></i>`).join("")}</div>`;
       b.innerHTML=html;
       week.appendChild(b);
     }
@@ -470,10 +527,70 @@ function renderSide(){
   const d=parse(selected), hn=holidayName(selected);
   $("sideDate").textContent=(d.getMonth()+1)+"/"+d.getDate();
   $("sideSub").innerHTML=`${d.getFullYear()}年・${WD[d.getDay()]}曜日${selected===today?"・今日":""}${hn?`<br><span class="h">${hn}</span>`:""}`;
-  const evs=eventsOn(selected);
-  $("list").innerHTML=evs.length?evs.map(({e,st})=>itemHTML(e,st,selected,timeLabel(e,st,selected))).join("")
-    :`<div class="empty">予定はありません</div>`;
+  const evs=eventsOn(selected), ts=tasksOn(selected);
+  let html=evs.map(({e,st})=>itemHTML(e,st,selected,timeLabel(e,st,selected))).join("");
+  if(ts.length) html+=`<div class="group-h">タスク</div>`+ts.map(t=>taskHTML(t,false)).join("");
+  $("list").innerHTML=html||`<div class="empty">予定はありません</div>`;
+  renderTasks();
 }
+/* ========== タスク ========== */
+let sideTab="day";
+function setTab(t){
+  sideTab=t;
+  $("tabDay").setAttribute("aria-selected",t==="day"); $("tabTasks").setAttribute("aria-selected",t==="tasks");
+  $("dayPane").hidden=t!=="day"; $("taskPane").hidden=t!=="tasks";
+  $("addBtn").textContent=t==="day"?"＋ この日に予定を追加":"＋ タスクを追加";
+  $("fab").setAttribute("aria-label",t==="day"?"予定を追加":"タスクを追加");
+}
+$("tabDay").onclick=()=>setTab("day");
+$("tabTasks").onclick=()=>setTab("tasks");
+function dueLabel(t){
+  if(!t.date) return "期限なし";
+  const d=parse(t.date), dd=diffDays(today,t.date);
+  const rel=dd===0?"今日":dd===1?"明日":dd===-1?"昨日":"";
+  const txt=`${rel||`${d.getMonth()+1}/${d.getDate()}(${WD[d.getDay()]})`}${t.start?" "+t.start:""}`;
+  return !t.done&&t.date<today?`<span class="over">期限切れ：${txt}</span>`:"期限："+txt;
+}
+function taskHTML(t,showDue=true){
+  const meta=[showDue?dueLabel(t):(t.start?t.start+"まで":""),hasRemind(t)?`通知：${remindLabel(+t.remind)}`:"",t.memo?esc(t.memo.split("\n")[0]).slice(0,60):""].filter(Boolean).join("　");
+  return `<div class="titem${t.done?" done":""}" data-id="${t.id}" style="--c:${esc(t.color)}">
+    <button type="button" class="check" data-act="toggle" aria-label="${esc(t.title)}を${t.done?"未完了に戻す":"完了にする"}" aria-pressed="${!!t.done}"></button>
+    <button type="button" class="tbody" data-act="open"><div class="ti">${esc(t.title)}</div>${meta?`<div class="tmeta">${meta}</div>`:""}</button></div>`;
+}
+function renderTasks(){
+  const ts=allTasks();
+  const open=ts.filter(t=>!t.done).sort(taskSort);
+  const over=open.filter(t=>t.date&&t.date<today), tod=open.filter(t=>t.date===today),
+        later=open.filter(t=>t.date&&t.date>today), nodue=open.filter(t=>!t.date);
+  const done=ts.filter(t=>t.done).sort((a,b)=>(b.doneAt||0)-(a.doneAt||0)).slice(0,30);
+  const grp=(h,list,cls="")=>list.length?`<div class="group-h ${cls}">${h}（${list.length}）</div>`+list.map(t=>taskHTML(t)).join(""):"";
+  const html=grp("期限切れ",over,"over")+grp("今日",tod)+grp("これから",later)+grp("期限なし",nodue)+grp("完了",done);
+  $("taskList").innerHTML=html||`<div class="empty">タスクはありません。上の欄から追加できます。</div>`;
+  const n=over.length+tod.length;
+  $("taskCount").textContent=n?String(n):"";
+  $("taskCount").title=n?`期限切れ・今日のタスク ${n}件`:"";
+}
+function toggleTask(id){
+  const t=store.events[id]; if(!t) return;
+  const done=!t.done;
+  store.events[id]={...t,done,doneAt:done?Date.now():null,updatedAt:Date.now()};
+  changed(); render();
+  if(done) toast("完了にしました");
+}
+function onTaskClick(ev){
+  const row=ev.target.closest(".titem"); if(!row) return false;
+  const act=ev.target.closest("[data-act]")?.dataset.act;
+  if(act==="toggle") toggleTask(row.dataset.id); else openEditor(row.dataset.id,selected);
+  return true;
+}
+$("taskList").addEventListener("click",onTaskClick);
+$("quickForm").onsubmit=ev=>{
+  ev.preventDefault();
+  const title=$("quickTask").value.trim(); if(!title) return;
+  const t={id:uid(),kind:"task",title,date:"",endDate:"",allDay:true,start:"",end:"",repeat:"none",until:"",exdates:[],remind:null,
+    color:COLORS[0],memo:"",done:false,doneAt:null,updatedAt:Date.now(),deleted:false};
+  store.events[t.id]=t; $("quickTask").value=""; changed(); render(); toast("タスクを追加しました");
+};
 const REP={daily:"毎日",weekly:"毎週",monthly:"毎月",yearly:"毎年"};
 function itemHTML(e,st,s,t){
   return `<button type="button" class="item" data-id="${e.id}" data-st="${st}" style="--c:${esc(e.color)}"><span class="bar"></span>
@@ -490,8 +607,8 @@ $("grid").addEventListener("click",ev=>{
   const s=b.dataset.date; if(s===selected && matchMedia("(min-width:861px)").matches){openEditor(null,s);return;}
   selected=s; const d=parse(s); if(d.getMonth()!==view.m||d.getFullYear()!==view.y){view={y:d.getFullYear(),m:d.getMonth()};}
   render();});
-$("list").addEventListener("click",ev=>{const b=ev.target.closest(".item");if(b) openEditor(b.dataset.id,selected,b.dataset.st);});
-$("addBtn").onclick=$("fab").onclick=()=>openEditor(null,selected);
+$("list").addEventListener("click",ev=>{ if(onTaskClick(ev)) return; const b=ev.target.closest(".item");if(b) openEditor(b.dataset.id,selected,b.dataset.st);});
+$("addBtn").onclick=$("fab").onclick=()=>sideTab==="tasks"?openEditor(null,selected,null,"task"):openEditor(null,selected);
 document.addEventListener("keydown",ev=>{
   if(ev.key==="Escape"){document.querySelectorAll(".backdrop.open").forEach(x=>x.classList.remove("open"));return;}
   if(document.querySelector(".backdrop.open")||/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
@@ -509,7 +626,24 @@ let editing=null, editingSt=null, pickedColor=COLORS[0];
 $("swatches").innerHTML=COLORS.map(c=>`<button type="button" class="sw" style="--c:${c}" data-c="${c}" aria-label="色 ${c}" aria-pressed="false"></button>`).join("");
 $("swatches").onclick=ev=>{const b=ev.target.closest(".sw");if(!b)return;pickedColor=b.dataset.c;paintSw();};
 function paintSw(){document.querySelectorAll(".sw").forEach(b=>b.setAttribute("aria-pressed",b.dataset.c===pickedColor));}
-function syncAllDay(){document.querySelectorAll(".timef").forEach(f=>f.style.display=$("fAllDay").checked?"none":"");}
+let editKind="event";
+function setKind(k){
+  editKind=k;
+  $("evForm").classList.toggle("task-mode",k==="task");
+  $("kindSeg").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.k===k));
+  $("fDateLbl").textContent=k==="task"?"期限":"開始日";
+  $("fStartLbl").textContent=k==="task"?"時刻（任意）":"開始時刻";
+  $("fTitle").placeholder=k==="task"?"例：レポートを出す":"例：歯医者";
+  $("evDlgTitle").textContent=(k==="task"?"タスク":"予定")+(editing?"を編集":"を追加");
+  syncAllDay(); syncRemind();
+}
+$("kindSeg").onclick=ev=>{const b=ev.target.closest("button");if(b) setKind(b.dataset.k);};
+$("fNoDue").onchange=()=>{syncAllDay();syncRemind();};
+function syncAllDay(){
+  const task=editKind==="task", noDue=task&&$("fNoDue").checked;
+  $("dateRow").style.display=noDue?"none":"";
+  document.querySelectorAll(".timef").forEach(f=>f.style.display=!task&&$("fAllDay").checked?"none":"");
+}
 const REMIND_PRESETS=["0","5","10","15","30","60","120","1440","2880","10080"];
 const hasRemind=e=>e.remind!==null&&e.remind!==undefined&&e.remind!==""&&+e.remind>=0;
 function remindLabel(m){
@@ -523,31 +657,37 @@ function remindLabel(m){
 function syncRemind(){
   const v=$("fRemind").value;
   $("remindCustomField").style.visibility=v==="custom"?"visible":"hidden";
-  $("remindNote").style.display=v!=="none"&&$("fAllDay").checked?"":"none";
+  const task=editKind==="task";
+  $("remindRow").style.display=task&&$("fNoDue").checked?"none":"";
+  $("remindNote").textContent=task?"時刻のないタスクは、期限の日の 9:00 を基準に通知します。":"終日の予定は、その日の 9:00 を基準に通知します。通知は Discord と Windows版のアプリに届きます。";
+  $("remindNote").style.display=v!=="none"&&(task?!$("fNoDue").checked&&!$("fStart").value:$("fAllDay").checked)?"":"none";
 }
 $("fRemind").onchange=()=>{syncRemind(); if($("fRemind").value==="custom") $("fRemindCustom").focus();};
 function syncRepeat(){$("untilField").style.visibility=$("fRepeat").value==="none"?"hidden":"visible";}
 $("fAllDay").onchange=()=>{syncAllDay();syncRemind();}; $("fRepeat").onchange=syncRepeat;
 $("fDate").onchange=()=>{ if(!$("fEndDate").value||$("fEndDate").value<$("fDate").value) $("fEndDate").value=$("fDate").value; };
-$("fStart").onchange=()=>{ const s=$("fStart").value; if(!s) return; if(!$("fEnd").value||($("fEndDate").value===$("fDate").value&&$("fEnd").value<=s)){
+$("fStart").onchange=()=>{ syncRemind(); const s=$("fStart").value; if(!s) return; if(!$("fEnd").value||($("fEndDate").value===$("fDate").value&&$("fEnd").value<=s)){
   const [h,m]=s.split(":").map(Number); $("fEnd").value=pad(Math.min(h+1,23))+":"+pad(m);} };
 
-function openEditor(id,date,st){
+function openEditor(id,date,st,kind){
   const e=id?store.events[id]:null; editing=e; editingSt=st||null;
-  $("evDlgTitle").textContent=e?"予定を編集":"予定を追加";
+  const k=e?(isTask(e)?"task":"event"):(kind||"event");
+  date=date||today;
   $("fTitle").value=e?e.title:"";
   $("fAllDay").checked=e?!!e.allDay:false;
-  $("fDate").value=e?e.date:date; $("fEndDate").value=e?(e.endDate||e.date):date;
+  $("fDate").value=e&&e.date?e.date:date; $("fEndDate").value=e&&e.date?(e.endDate||e.date):date;
+  $("fNoDue").checked=e?(isTask(e)&&!e.date):(k==="task"&&sideTab==="tasks");
+  $("fDone").checked=!!(e&&e.done);
   let defStart="10:00"; if(!e && date===today){const n=new Date();defStart=pad(Math.min(n.getHours()+1,23))+":00";}
-  $("fStart").value=e?(e.start||""):defStart;
+  $("fStart").value=e?(e.start||""):(k==="task"?"":defStart);
   $("fEnd").value=e?(e.end||""):pad(Math.min(+defStart.slice(0,2)+1,23))+":00";
   $("fRepeat").value=e?(e.repeat||"none"):"none"; $("fUntil").value=e?(e.until||""):"";
   if(e&&hasRemind(e)){ const r=String(+e.remind); if(REMIND_PRESETS.includes(r)){$("fRemind").value=r;$("fRemindCustom").value="";} else {$("fRemind").value="custom";$("fRemindCustom").value=r;} }
   else { $("fRemind").value="none"; $("fRemindCustom").value=""; }
   $("fMemo").value=e?(e.memo||""):"";
-  pickedColor=e?e.color:COLORS[0]; paintSw(); syncAllDay(); syncRepeat(); syncRemind();
+  pickedColor=e?e.color:COLORS[0]; paintSw(); syncRepeat(); setKind(k);
   $("delBtn").style.display=e?"":"none";
-  $("delOneBtn").style.display=e&&e.repeat&&e.repeat!=="none"?"":"none";
+  $("delOneBtn").style.display=e&&!isTask(e)&&e.repeat&&e.repeat!=="none"?"":"none";
   $("delBtn").textContent=e&&e.repeat&&e.repeat!=="none"?"すべて削除":"削除";
   $("evDlg").classList.add("open");
   setTimeout(()=>{ if(!e) $("fTitle").focus(); },50);
@@ -556,7 +696,9 @@ $("cancelBtn").onclick=()=>$("evDlg").classList.remove("open");
 $("evForm").onsubmit=ev=>{
   ev.preventDefault();
   const title=$("fTitle").value.trim(); if(!title){$("fTitle").focus();return;}
+  if(editKind==="task"){ saveTask(title); return; }
   let date=$("fDate").value, endDate=$("fEndDate").value||date;
+  if(!date){ toast("開始日を入れてください"); return; }
   if(endDate<date) endDate=date;
   const allDay=$("fAllDay").checked;
   let start=allDay?"":$("fStart").value, end=allDay?"":$("fEnd").value;
@@ -566,12 +708,36 @@ $("evForm").onsubmit=ev=>{
   if(rv==="custom"){ const n=parseInt($("fRemindCustom").value,10); if(!(n>=0&&n<=43200)){ toast("通知は 0〜43200 分前の間で入れてください"); $("fRemindCustom").focus(); return; } remind=n; }
   else if(rv!=="none") remind=+rv;
   const base=editing?{...editing}:{id:uid(),exdates:[]};
-  const e={...base,title,date,endDate,allDay,start,end,repeat,until,remind,color:pickedColor,memo:$("fMemo").value,updatedAt:Date.now(),deleted:false};
+  const e={...base,kind:"event",title,date,endDate,allDay,start,end,repeat,until,remind,color:pickedColor,memo:$("fMemo").value,updatedAt:Date.now(),deleted:false};
+  delete e.done; delete e.doneAt;
   store.events[e.id]=e; changed();
   $("evDlg").classList.remove("open");
   selected=date; const d=parse(date); view={y:d.getFullYear(),m:d.getMonth()}; render();
   toast("保存しました");
 };
+function readRemind(){
+  const rv=$("fRemind").value;
+  if(rv==="none") return null;
+  if(rv!=="custom") return +rv;
+  const n=parseInt($("fRemindCustom").value,10);
+  return n>=0&&n<=43200?n:undefined;
+}
+function saveTask(title){
+  const noDue=$("fNoDue").checked;
+  const date=noDue?"":$("fDate").value;
+  if(!noDue&&!date){ toast("期限を入れるか「期限なし」にしてください"); return; }
+  const start=date?$("fStart").value:"";
+  let remind=date?readRemind():null;
+  if(remind===undefined){ toast("通知は 0〜43200 分前の間で入れてください"); $("fRemindCustom").focus(); return; }
+  const done=$("fDone").checked;
+  const base=editing?{...editing}:{id:uid()};
+  const t={...base,kind:"task",title,date,endDate:date,allDay:!start,start,end:"",repeat:"none",until:"",exdates:[],remind,
+    color:pickedColor,memo:$("fMemo").value,done,doneAt:done?(editing&&editing.done?editing.doneAt:Date.now()):null,updatedAt:Date.now(),deleted:false};
+  store.events[t.id]=t; changed();
+  $("evDlg").classList.remove("open");
+  if(date&&sideTab==="day"){ selected=date; const d=parse(date); view={y:d.getFullYear(),m:d.getMonth()}; }
+  render(); toast("保存しました");
+}
 $("delBtn").onclick=()=>{ if(!editing) return; if(!confirmTwice($("delBtn"))) return;
   store.events[editing.id]={id:editing.id,deleted:true,updatedAt:Date.now()}; changed(); $("evDlg").classList.remove("open"); render(); toast("削除しました"); };
 $("delOneBtn").onclick=()=>{ if(!editing) return; const st=editingSt||selected;
@@ -591,11 +757,16 @@ $("q").oninput=doSearch;
 function doSearch(){
   const q=$("q").value.trim().toLowerCase();
   if(!q){$("results").innerHTML=`<div class="empty">言葉を入れると、タイトルとメモから探します</div>`;return;}
-  const hits=live().filter(e=>(e.title+" "+(e.memo||"")).toLowerCase().includes(q)).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,100);
-  $("results").innerHTML=hits.length?hits.map(e=>{const d=parse(e.date);
+  const hits=live().filter(e=>((e.title||"")+" "+(e.memo||"")).toLowerCase().includes(q)).sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,100);
+  $("results").innerHTML=hits.length?hits.map(e=>{
+    if(isTask(e)) return taskHTML(e);
+    const d=parse(e.date);
     return itemHTML(e,e.date,e.date,`${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}(${WD[d.getDay()]})`);}).join(""):`<div class="empty">見つかりませんでした</div>`;
 }
-$("results").addEventListener("click",ev=>{const b=ev.target.closest(".item");if(!b)return;const e=store.events[b.dataset.id];
+$("results").addEventListener("click",ev=>{
+  const row=ev.target.closest(".titem");
+  if(row){ if(ev.target.closest("[data-act]")?.dataset.act==="toggle"){toggleTask(row.dataset.id);doSearch();} else {$("searchDlg").classList.remove("open");openEditor(row.dataset.id,selected);} return; }
+  const b=ev.target.closest(".item");if(!b)return;const e=store.events[b.dataset.id];
   selected=e.date;const d=parse(e.date);view={y:d.getFullYear(),m:d.getMonth()};$("searchDlg").classList.remove("open");render();});
 
 /* ========== 設定 ========== */
@@ -697,7 +868,7 @@ function paintPill(busy){
   else {t.textContent=store.sync.dirty?"未送信あり":"同期待ち";}
 }
 function paintStatus(){
-  const n=live().length; let s=`予定 ${n}件（この端末に保存）<br>`;
+  const n=liveEvents().length, nt=allTasks().length; let s=`予定 ${n}件・タスク ${nt}件（この端末に保存）<br>`;
   if(!store.sync.token) s+="同期：未設定。トークンを入れるとPCとスマホで同期します。";
   else s+=`同期：${syncState==="ok"?"OK":syncState==="err"?"エラー – "+esc(syncMsg):syncState==="pending"?"オフライン（つながったら送ります）":"待機中"}`+
     (store.sync.last?`<br>最後に同期：${fmtTime(store.sync.last)}`:"");

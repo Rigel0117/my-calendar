@@ -3,6 +3,7 @@
  *
  * 1分おきに同期データ（GitHub Gist）を読み、予定ごとに決めた「何分前」になったら
  * Discord のチャンネルに通知を送ります。PCやスマホの電源が切れていても届きます。
+ * タスクにも対応しています（完了にしたタスクは通知しません）。
  *
  * 使い方は notify/Discord通知の手順.md を見てください。
  * 下の2つ（GITHUB_TOKEN と DISCORD_WEBHOOK_URL）だけ、自分のものに書き換えます。
@@ -45,6 +46,7 @@ function checkReminders() {
 
     for (const e of Object.values(events)) {
       if (!e || e.deleted || !e.date || !hasRemind(e)) continue;
+      if (e.kind === 'task' && e.done) continue; // 完了したタスクは通知しない
       const m = Number(e.remind);
       const ahead = Math.floor(m / 1440) + 2;
       for (let k = -1; k <= ahead; k++) {
@@ -81,8 +83,10 @@ function sendTest() {
 // ---------------- メッセージ ----------------
 function message(e, d, m) {
   const md = Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) + '(' + WD[dow(d)] + ')';
+  const task = e.kind === 'task';
   let when;
-  if (e.allDay) when = '終日';
+  if (task) when = e.start ? e.start + 'まで' : '期限の日';
+  else if (e.allDay) when = '終日';
   else {
     const span = spanOf(e);
     when = span === 0 ? (e.start || '') + (e.end ? '–' + e.end : '') : (e.start || '') + '〜' + fmtMD(addDays(d, span)) + ' ' + (e.end || '');
@@ -92,7 +96,7 @@ function message(e, d, m) {
   if (e.memo && String(e.memo).trim()) lines.push(String(e.memo).trim().slice(0, 1500));
   return {
     // スマホの通知に出る文
-    content: '🔔 ' + e.title + ' — ' + md + ' ' + when,
+    content: (task ? '☑️ タスク：' : '🔔 ') + e.title + ' — ' + md + ' ' + when,
     embeds: [{
       title: String(e.title || '').slice(0, 250),
       description: lines.join('\n'),
