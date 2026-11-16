@@ -4,8 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>マイカレンダー</title>
-<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#16181d" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f5f1" id="themeColor">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -357,7 +356,14 @@ let today=ymd(new Date());
 let view=(()=>{const d=new Date();return {y:d.getFullYear(),m:d.getMonth()};})();
 let selected=today;
 
-function applyTheme(){ const t=store.settings.theme; if(t) document.documentElement.dataset.theme=t; else delete document.documentElement.dataset.theme; }
+const darkMQ=matchMedia("(prefers-color-scheme: dark)");
+function applyTheme(){
+  const t=store.settings.theme; if(t) document.documentElement.dataset.theme=t; else delete document.documentElement.dataset.theme;
+  // タイトルバーの色も、実際に表示しているテーマに合わせる
+  const dark=t?t==="dark":darkMQ.matches;
+  $("themeColor").setAttribute("content",dark?"#16181d":"#f6f5f1");
+}
+darkMQ.addEventListener("change",applyTheme);
 
 function render(){
   today=ymd(new Date());

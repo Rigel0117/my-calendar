@@ -1,0 +1,41 @@
+# windows フォルダの中身が変わるたびに、GitHubが無料で MyCalendar.exe を作って「Releases」に置きます
+name: Windowsアプリを作る
+
+on:
+  push:
+    paths:
+      - "windows/**"
+      - ".github/workflows/build-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: exe を作る
+        run: >
+          dotnet publish windows/MyCalendar.csproj -c Release -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=none
+          -o out
+
+      - name: Releases に置く
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows-v${{ github.run_number }}
+          name: マイカレンダー Windows版 ${{ github.run_number }}
+          body: 下の MyCalendar.exe をダウンロードして使ってください。
+          files: out/MyCalendar.exe
+          make_latest: true
