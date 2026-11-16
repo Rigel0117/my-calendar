@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>マイカレンダー</title>
 <meta name="theme-color" content="#f6f5f1" id="themeColor">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -37,6 +37,13 @@
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
+/* iPhone：ページ全体が動いて上部（ステータスバーの下）に潜り込まないよう、スクロールは各欄の中だけにする */
+html{background:var(--paper);-webkit-text-size-adjust:100%}
+html,body{overflow:hidden;overscroll-behavior:none}
+/* ダブルタップで拡大しないようにする */
+*{touch-action:manipulation}
+/* ステータスバー（時計・Dynamic Island）の後ろを、背景と同じ色でしっかり塗る */
+body::before{content:"";position:fixed;left:0;right:0;top:0;height:env(safe-area-inset-top);background:var(--paper);z-index:40;pointer-events:none}
 body{background:var(--paper);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.5;
   -webkit-tap-highlight-color:transparent;
   padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
@@ -190,7 +197,9 @@ hr{border:0;border-top:1px solid var(--line);margin:16px 0}
 
 /* スマホ */
 @media (max-width: 860px){
-  header{padding:8px 12px;gap:6px}
+  header{padding:10px 12px 8px;gap:6px}
+  /* 入力欄の文字が16px未満だと、iPhoneが自動で拡大してしまう */
+  input,select,textarea,.quick input{font-size:16px}
   header{gap:5px}
   .icon-btn,.sync-pill{flex:none}
   .icon-btn{min-width:34px;padding:0 8px}
