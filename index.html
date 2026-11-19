@@ -151,8 +151,9 @@ main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:0 16px 16px;m
 .chip.task .ck{width:10px;height:10px;border:1.5px solid var(--c);border-radius:3px;flex:none}
 .chip.task.done{color:var(--muted);text-decoration:line-through}
 .chip.task.done .ck{background:var(--c)}
-.dots i.sq{border-radius:2px}
-.dots i.sq.done{opacity:.35}
+/* タスクは小さなチェックボックスの形（予定の丸い点と見分けやすく） */
+.dots i.sq{width:8px;height:8px;border-radius:2px;background:none;border:2px solid var(--c);box-sizing:border-box}
+.dots i.sq.done{background:var(--c);opacity:.4}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px;margin-bottom:14px;background:var(--paper)}
 .seg button{border:0;background:none;padding:6px 18px;border-radius:999px;font-weight:600;color:var(--muted)}
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
@@ -588,6 +589,7 @@ function renderTasks(){
   const done=ts.filter(t=>t.done).sort((a,b)=>(b.doneAt||0)-(a.doneAt||0)).slice(0,30);
   const grp=(h,list,cls="")=>list.length?`<div class="group-h ${cls}">${h}（${list.length}）</div>`+list.map(t=>taskHTML(t)).join(""):"";
   const html=grp("期限切れ",over,"over")+grp("今日",tod)+grp("これから",later)+grp("期限なし",nodue)+grp("完了",done);
+  $("quickTask").placeholder=`${fmtMD(selected)} のタスクを入力（Enter）`;
   $("taskList").innerHTML=html||`<div class="empty">タスクはありません。上の欄から追加できます。</div>`;
   const n=over.length+tod.length;
   $("taskCount").textContent=n?String(n):"";
@@ -610,9 +612,10 @@ $("taskList").addEventListener("click",onTaskClick);
 $("quickForm").onsubmit=ev=>{
   ev.preventDefault();
   const title=$("quickTask").value.trim(); if(!title) return;
-  const t={id:uid(),kind:"task",title,date:"",endDate:"",allDay:true,start:"",end:"",repeat:"none",until:"",exdates:[],remind:null,
+  // 選んでいる日を期限にして、カレンダーに表示されるようにする
+  const t={id:uid(),kind:"task",title,date:selected,endDate:selected,allDay:true,start:"",end:"",repeat:"none",until:"",exdates:[],remind:null,
     color:COLORS[0],memo:"",done:false,doneAt:null,updatedAt:Date.now(),deleted:false};
-  store.events[t.id]=t; $("quickTask").value=""; changed(); render(); toast("タスクを追加しました");
+  store.events[t.id]=t; $("quickTask").value=""; changed(); render(); toast(`${fmtMD(selected)} が期限のタスクを追加しました`);
 };
 const REP={daily:"毎日",weekly:"毎週",monthly:"毎月",yearly:"毎年"};
 function itemHTML(e,st,s,t){
@@ -700,7 +703,7 @@ function openEditor(id,date,st,kind){
   $("fTitle").value=e?e.title:"";
   $("fAllDay").checked=e?!!e.allDay:false;
   $("fDate").value=e&&e.date?e.date:date; $("fEndDate").value=e&&e.date?(e.endDate||e.date):date;
-  $("fNoDue").checked=e?(isTask(e)&&!dueOf(e)):(k==="task"&&sideTab==="tasks");
+  $("fNoDue").checked=e?(isTask(e)&&!dueOf(e)):false;
   if(e&&isTask(e)&&dueOf(e)) $("fDate").value=dueOf(e);
   $("fTaskStart").value=e&&isTask(e)&&isSpanTask(e)?e.date:"";
   $("fDone").checked=!!(e&&e.done);

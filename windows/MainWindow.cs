@@ -31,7 +31,7 @@ public class MainWindow : Window
     StackPanel taskList = null!;
     TextBox quick = null!;
     Border tabDay = null!, tabTasks = null!, taskBadge = null!;
-    TextBlock taskBadgeText = null!;
+    TextBlock taskBadgeText = null!, quickHint = null!;
 
     // 同期
     public SyncState SyncStateNow = SyncState.Local;
@@ -291,7 +291,7 @@ public class MainWindow : Window
         UI.AutomationName(quick, "新しいタスク");
         quick.ToolTip = "タスクを入力して Enter";
         quick.KeyDown += (_, e) => { if (e.Key == Key.Enter) { QuickAdd(); e.Handled = true; } };
-        var quickHint = new TextBlock { Text = "タスクを入力して Enter", Foreground = P.Muted, IsHitTestVisible = false, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        quickHint = new TextBlock { Text = "タスクを入力して Enter", Foreground = P.Muted, IsHitTestVisible = false, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         quick.TextChanged += (_, _) => quickHint.Visibility = quick.Text == "" ? Visibility.Visible : Visibility.Collapsed;
         var quickBox = new Grid(); quickBox.Children.Add(quick); quickBox.Children.Add(quickHint);
         quickRow.Children.Add(quickAdd); quickRow.Children.Add(quickBox);
@@ -341,7 +341,7 @@ public class MainWindow : Window
 
     void AddFromSide()
     {
-        if (sideTab == "tasks") OpenEditor(null, selected, null, "task", true);
+        if (sideTab == "tasks") OpenEditor(null, selected, null, "task");
         else OpenEditor(null, selected, null);
     }
 
@@ -352,7 +352,8 @@ public class MainWindow : Window
         var t = new CalEvent
         {
             Id = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString("x") + Guid.NewGuid().ToString("N")[..6],
-            Kind = "task", Title = title, Date = "", EndDate = "", AllDay = true, Start = "", End = "", Repeat = "none", Until = "",
+            // 選んでいる日を期限にして、カレンダーに表示されるようにする
+            Kind = "task", Title = title, Date = Dates.F(selected), EndDate = Dates.F(selected), AllDay = true, Start = "", End = "", Repeat = "none", Until = "",
             Exdates = new List<string>(), Color = UI.Colors[0], Memo = "", Done = false, UpdatedAt = Store.Now(),
         };
         Store.Events[t.Id] = t;
@@ -463,6 +464,8 @@ public class MainWindow : Window
         if (taskList.Children.Count == 0)
             taskList.Children.Add(new TextBlock { Text = "タスクはありません。上の欄から追加できます。", Foreground = P.Muted, HorizontalAlignment = HorizontalAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 28, 0, 0) });
 
+        quickHint.Text = $"{selected.Month}/{selected.Day} のタスクを入力（Enter）";
+        quick.ToolTip = quickHint.Text;
         int n = over.Count + tod.Count;
         taskBadgeText.Text = n.ToString();
         taskBadge.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
